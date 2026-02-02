@@ -1,0 +1,44 @@
+[tool.poetry]
+name = "aerial-images-upload-gui"
+version = "0.1.0"
+description = "Cross-platform GUI for staging and uploading drone survey images"
+authors = ["DFN Team"]
+readme = "README.md"
+packages = [{include = "src"}]
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.13"
+PySide6 = "^6.6.0"
+aiohttp = "^3.9.0"
+Pillow = "^10.1.0"
+psutil = "^5.9.0"
+matplotlib = "^3.8.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+pytest-qt = "^4.2.0"
+pytest-asyncio = "^0.21.0"
+pytest-cov = "^4.1.0"
+aioresponses = "^0.7.6"
+black = "^24.2.0"
+coverage = "^7.3.0"
+
+[tool.poetry.scripts]
+dfn-uploader = "src.main:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "--cov=src --cov-report=xml --cov-report=html --cov-report=term"
+
+[tool.black]
+line-length = 100
+target-version = ['py310']
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["*/tests/*", "*/test_*.py"]

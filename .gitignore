@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Poetry
+# poetry.lock
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.coverage
+coverage.xml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Application data
+config.json
+state.db
+state.db-shm
+state.db-wal
+staging/
+*.log
+
+# PyInstaller
+*.spec
+build/
+dist/
+
+# macOS
+.DS_Store
+
+# Temporary files
+*.tmp
