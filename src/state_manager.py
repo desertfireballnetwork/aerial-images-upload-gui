@@ -300,6 +300,26 @@ class StateManager:
                 return json.loads(row["value"])
             return default
 
+    def reset_stuck_uploading(self) -> int:
+        """Reset any images stuck in 'uploading' status back to 'staged'.
+
+        This is a crash-recovery mechanism: if the app exits while images
+        are mid-upload, those images would otherwise be permanently stuck
+        since get_staged_images() only queries status='staged'.
+
+        Returns:
+            Number of images that were reset.
+        """
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE images
+                SET status = 'staged', error_message = NULL
+                WHERE status = 'uploading'
+                """
+            )
+            return cursor.rowcount
+
     def delete_uploaded_image_record(self, image_id: int):
         """Delete an uploaded image record (for cleanup)."""
         with self.transaction() as conn:

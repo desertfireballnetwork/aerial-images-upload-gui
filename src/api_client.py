@@ -2,6 +2,8 @@
 API client for communicating with DFN webapp upload endpoints.
 """
 
+import mimetypes
+
 import aiohttp
 from pathlib import Path
 from typing import Optional, Tuple
@@ -82,11 +84,12 @@ class APIClient:
                 data = aiohttp.FormData()
                 data.add_field("key", upload_key)
                 data.add_field("image_type", image_type)
+                content_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
                 data.add_field(
                     "image",
                     f,
                     filename=file_path.name,
-                    content_type="image/jpeg",
+                    content_type=content_type,
                 )
 
                 async with self.session.post(url, data=data) as response:

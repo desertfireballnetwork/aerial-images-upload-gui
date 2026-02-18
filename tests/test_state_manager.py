@@ -159,3 +159,39 @@ def test_increment_retry_count(mock_state_manager):
     staged = mock_state_manager.get_staged_images()
     row = next(i for i in staged if i["filename"] == "retry_unique_abc.jpg")
     assert row["retry_count"] == 2
+
+
+def test_reset_stuck_uploading(mock_state_manager):
+    """reset_stuck_uploading moves 'uploading' images back to 'staged'."""
+    id1 = mock_state_manager.add_image("stuck1.jpg", "/tmp/stuck1.jpg", "survey")
+    id2 = mock_state_manager.add_image("stuck2.jpg", "/tmp/stuck2.jpg", "survey")
+    id3 = mock_state_manager.add_image("ok.jpg", "/tmp/ok.jpg", "survey")
+
+    mock_state_manager.update_image_status(id1, "uploading")
+    mock_state_manager.update_image_status(id2, "uploading")
+    # id3 stays 'staged'
+
+    reset_count = mock_state_manager.reset_stuck_uploading()
+    assert reset_count == 2
+
+    counts = mock_state_manager.get_image_counts()
+    assert counts["staged"] == 3
+    assert counts.get("uploading", 0) == 0
+
+
+def test_reset_stuck_uploading_clears_error_message(mock_state_manager):
+    """reset_stuck_uploading clears any error_message on reset images."""
+    image_id = mock_state_manager.add_image("err.jpg", "/tmp/err.jpg", "survey")
+    mock_state_manager.update_image_status(image_id, "uploading", "partial upload")
+
+    mock_state_manager.reset_stuck_uploading()
+
+    staged = mock_state_manager.get_staged_images()
+    row = next(i for i in staged if i["filename"] == "err.jpg")
+    assert row is not None
+
+
+def test_reset_stuck_uploading_returns_zero_when_none(mock_state_manager):
+    """reset_stuck_uploading returns 0 when no images are stuck."""
+    mock_state_manager.add_image("fine.jpg", "/tmp/fine.jpg", "survey")
+    assert mock_state_manager.reset_stuck_uploading() == 0

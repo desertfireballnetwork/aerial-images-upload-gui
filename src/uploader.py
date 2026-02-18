@@ -1205,6 +1205,13 @@ class UploaderWindow(QMainWindow):
             )
             return
 
+        # Crash recovery: reset any images stuck in 'uploading' from a
+        # previous run that crashed or was killed mid-flight.
+        reset_count = self.state_manager.reset_stuck_uploading()
+        if reset_count > 0:
+            self.log(f"Recovered {reset_count} image(s) stuck from a previous session")
+            self.update_counts()
+
         counts = self.state_manager.get_image_counts()
         if counts.get("staged", 0) == 0:
             QMessageBox.information(
@@ -1215,7 +1222,10 @@ class UploaderWindow(QMainWindow):
             return
 
         # Start upload thread
-        self.upload_thread = UploadManager(upload_key, self.state_manager, self.stats_tracker)
+        base_url = self.config.get("base_url", "https://find.gfo.rocks")
+        self.upload_thread = UploadManager(
+            upload_key, self.state_manager, self.stats_tracker, base_url=base_url
+        )
 
         if self.auto_radio.isChecked():
             self.upload_thread.set_auto_optimize(True)
