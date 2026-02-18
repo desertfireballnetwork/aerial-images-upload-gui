@@ -1,6 +1,7 @@
 """
 API client for communicating with DFN webapp upload endpoints.
 """
+
 import aiohttp
 from pathlib import Path
 from typing import Optional, Tuple
@@ -18,9 +19,7 @@ class APIClient:
 
     async def __aenter__(self):
         """Create session on context enter."""
-        self.session = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=300, connect=30)
-        )
+        self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=300, connect=30))
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -42,8 +41,8 @@ class APIClient:
         if not self.session:
             raise RuntimeError("APIClient must be used as context manager")
 
-        url = f"{self.base_url}/dfnweb/check_image_uploaded/"
-        data = {"upload_key": upload_key, "filename": filename}
+        url = f"{self.base_url}/survey/upload/check/"
+        data = {"key": upload_key, "image": filename}
 
         try:
             async with self.session.post(url, data=data) as response:
@@ -76,15 +75,15 @@ class APIClient:
         if not self.session:
             raise RuntimeError("APIClient must be used as context manager")
 
-        url = f"{self.base_url}/dfnweb/upload_image/"
+        url = f"{self.base_url}/survey/upload/"
 
         try:
             with open(file_path, "rb") as f:
                 data = aiohttp.FormData()
-                data.add_field("upload_key", upload_key)
+                data.add_field("key", upload_key)
                 data.add_field("image_type", image_type)
                 data.add_field(
-                    "image_file",
+                    "image",
                     f,
                     filename=file_path.name,
                     content_type="image/jpeg",

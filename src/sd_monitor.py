@@ -1,6 +1,7 @@
 """
 Cross-platform SD card detection and monitoring.
 """
+
 import psutil
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -131,9 +132,7 @@ class SDMonitor:
             try:
                 usage = psutil.disk_usage(device)
                 partitions = psutil.disk_partitions(all=False)
-                device_name = next(
-                    (p.device for p in partitions if p.mountpoint == device), device
-                )
+                device_name = next((p.device for p in partitions if p.mountpoint == device), device)
 
                 sd_cards.append(
                     SDCardInfo(
@@ -178,7 +177,10 @@ class SDMonitor:
                 logger.warning(f"Error getting info for new device {path}: {e}")
 
         # For removed devices, we can't get current info, so just store paths
-        removed = [SDCardInfo(path=path, device=path, total_bytes=0, free_bytes=0) for path in removed_paths]
+        removed = [
+            SDCardInfo(path=path, device=path, total_bytes=0, free_bytes=0)
+            for path in removed_paths
+        ]
 
         self._last_devices = current_devices
 
