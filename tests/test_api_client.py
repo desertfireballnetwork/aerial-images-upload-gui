@@ -141,3 +141,77 @@ async def test_custom_base_url():
         async with APIClient("https://custom.example.com") as client:
             result = await client.check_image_uploaded("test-key", "test.jpg")
             assert result is False
+
+
+@pytest.mark.asyncio
+async def test_upload_image_uses_correct_mime_type_for_png(tmp_path):
+    """Upload of a .png file should use content_type='image/png', not 'image/jpeg'."""
+    from PIL import Image as PILImage
+
+    png_file = tmp_path / "test_image.png"
+    PILImage.new("RGB", (100, 100), color="red").save(png_file, "PNG")
+
+    captured_content_type = None
+    original_add_field = aiohttp.FormData.add_field
+
+    def patched_add_field(self, name, value, **kwargs):
+        nonlocal captured_content_type
+        if name == "image":
+            captured_content_type = kwargs.get("content_type")
+        return original_add_field(self, name, value, **kwargs)
+
+    with aioresponses() as m:
+        m.post(UPLOAD_URL, status=200, body="SUCCESS")
+        with patch.object(aiohttp.FormData, "add_field", patched_add_field):
+            async with APIClient() as client:
+                success, message = await client.upload_image("test-key", "survey", png_file)
+                assert success is True
+
+    assert captured_content_type == "image/png"
+
+
+@pytest.mark.asyncio
+async def test_upload_image_uses_jpeg_mime_for_jpg(sample_image):
+    """Upload of a .jpg file should use content_type='image/jpeg'."""
+    captured_content_type = None
+    original_add_field = aiohttp.FormData.add_field
+
+    def patched_add_field(self, name, value, **kwargs):
+        nonlocal captured_content_type
+        if name == "image":
+            captured_content_type = kwargs.get("content_type")
+        return original_add_field(self, name, value, **kwargs)
+
+    with aioresponses() as m:
+        m.post(UPLOAD_URL, status=200, body="SUCCESS")
+        with patch.object(aiohttp.FormData, "add_field", patched_add_field):
+            async with APIClient() as client:
+                success, message = await client.upload_image("test-key", "survey", sample_image)
+                assert success is True
+
+    assert captured_content_type == "image/jpeg"
+
+
+@pytest.mark.asyncio
+async def test_upload_image_unknown_extension_uses_octet_stream(tmp_path):
+    """Upload of a file with unknown extension falls back to application/octet-stream."""
+    unknown_file = tmp_path / "test_image.xyz123"
+    unknown_file.write_bytes(b"some binary data")
+
+    captured_content_type = None
+    original_add_field = aiohttp.FormData.add_field
+
+    def patched_add_field(self, name, value, **kwargs):
+        nonlocal captured_content_type
+        if name == "image":
+            captured_content_type = kwargs.get("content_type")
+        return original_add_field(self, name, value, **kwargs)
+
+    with aioresponses() as m:
+        m.post(UPLOAD_URL, status=200, body="SUCCESS")
+        with patch.object(aiohttp.FormData, "add_field", patched_add_field):
+            async with APIClient() as client:
+                success, message = await client.upload_image("test-key", "survey", unknown_file)
+                assert success is True
+
+    assert captured_content_type == "application/octet-stream"

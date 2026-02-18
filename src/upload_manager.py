@@ -200,6 +200,16 @@ class UploadManager(QThread):
                     # Upload failed
                     logger.warning(f"Upload attempt {attempt + 1} failed for {filename}: {message}")
 
+                    # Don't retry permanent failures (4xx responses)
+                    if self._is_permanent_failure(message):
+                        logger.warning(f"Permanent failure for {filename}, not retrying: {message}")
+                        self.state_manager.increment_retry_count(image_id)
+                        self.state_manager.update_image_status(
+                            image_id, "failed", f"Upload failed: {message}"
+                        )
+                        self.upload_failed.emit(filename, message)
+                        return False
+
                     if attempt < self.MAX_RETRIES - 1:
                         # Wait before retry with exponential backoff
                         delay = self.RETRY_BASE_DELAY * (2**attempt)
@@ -250,8 +260,26 @@ class UploadManager(QThread):
 
             queue.task_done()
 
+    @staticmethod
+    def _is_permanent_failure(message: str) -> bool:
+        """Check if an upload failure is permanent and should not be retried.
+
+        Permanent failures include HTTP 4xx responses (bad request, not found,
+        forbidden, etc.) which indicate client-side errors that won't resolve
+        on retry.
+        """
+        return message.startswith("HTTP 4")
+
     async def _upload_loop(self):
         """Main upload loop."""
+        # Crash recovery: reset any images stuck in 'uploading' from a
+        # previous run that crashed or was killed mid-flight.
+        reset_count = self.state_manager.reset_stuck_uploading()
+        if reset_count > 0:
+            logger.info(
+                f"Reset {reset_count} images from 'uploading' back to 'staged' (crash recovery)"
+            )
+
         async with APIClient(self.base_url) as client:
             while not self._should_stop:
                 # Get staged images

@@ -171,3 +171,34 @@ class TestAdjustWorkerCount:
 
         assert manager.last_measurement_bytes == 500_000
         assert manager.last_measurement_time == pytest.approx(time.time(), abs=1.0)
+
+
+# ---------------------------------------------------------------------------
+# _is_permanent_failure
+# ---------------------------------------------------------------------------
+
+
+class TestIsPermanentFailure:
+    def test_http_400_is_permanent(self, manager):
+        assert manager._is_permanent_failure("HTTP 400: Bad Request") is True
+
+    def test_http_404_is_permanent(self, manager):
+        assert manager._is_permanent_failure("HTTP 404: Not Found") is True
+
+    def test_http_403_is_permanent(self, manager):
+        assert manager._is_permanent_failure("HTTP 403: Forbidden") is True
+
+    def test_http_422_is_permanent(self, manager):
+        assert manager._is_permanent_failure("HTTP 422: Unprocessable Entity") is True
+
+    def test_http_500_is_not_permanent(self, manager):
+        assert manager._is_permanent_failure("HTTP 500: Internal Server Error") is False
+
+    def test_http_502_is_not_permanent(self, manager):
+        assert manager._is_permanent_failure("HTTP 502: Bad Gateway") is False
+
+    def test_network_error_is_not_permanent(self, manager):
+        assert manager._is_permanent_failure("connection refused") is False
+
+    def test_error_body_is_not_permanent(self, manager):
+        assert manager._is_permanent_failure("ERROR - something") is False

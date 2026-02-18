@@ -54,6 +54,7 @@ Settings are persisted in `config.json`:
 - `staging_dir`: Local directory for staging images
 - `concurrency_mode`: "auto" or "manual"
 - `concurrency_value`: Number of parallel workers (1-10)
+- `base_url`: Webapp server URL (defaults to `https://find.gfo.rocks`)
 
 ## Architecture
 
