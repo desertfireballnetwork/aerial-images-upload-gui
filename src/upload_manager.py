@@ -1,6 +1,7 @@
 """
 Upload manager with auto-optimizing parallel uploads.
 """
+
 import asyncio
 import time
 from pathlib import Path
@@ -34,6 +35,8 @@ class UploadManager(QThread):
     IMPROVEMENT_THRESHOLD = 0.10  # 10% improvement to increase workers
     MAX_RETRIES = 5
     RETRY_BASE_DELAY = 1.0  # seconds
+    PAUSE_POLL_INTERVAL = 0.5  # seconds between pause-state checks in _worker
+    PROGRESS_TICK_INTERVAL = 1.0  # seconds between progress-update ticks in _upload_loop
 
     def __init__(
         self,
@@ -132,9 +135,7 @@ class UploadManager(QThread):
         self.last_measurement_bytes = current_bytes
         self.last_throughput = current_throughput
 
-    async def _upload_single_image(
-        self, client: APIClient, image_data: Dict[str, Any]
-    ) -> bool:
+    async def _upload_single_image(self, client: APIClient, image_data: Dict[str, Any]) -> bool:
         """
         Upload a single image with retry logic.
 
@@ -160,14 +161,14 @@ class UploadManager(QThread):
             if already_uploaded:
                 logger.info(f"{filename} already uploaded, marking as complete")
                 self.state_manager.update_image_status(image_id, "uploaded")
-                
+
                 # Remove the file
                 if file_path.exists():
                     try:
                         file_path.unlink()
                     except Exception as e:
                         logger.warning(f"Could not delete {file_path}: {e}")
-                
+
                 self.upload_completed.emit(filename, 0)
                 return True
         except Exception as e:
@@ -178,9 +179,7 @@ class UploadManager(QThread):
         for attempt in range(self.MAX_RETRIES):
             try:
                 # Upload the image
-                success, message = await client.upload_image(
-                    self.upload_key, image_type, file_path
-                )
+                success, message = await client.upload_image(self.upload_key, image_type, file_path)
 
                 if success:
                     # Record success
@@ -244,7 +243,7 @@ class UploadManager(QThread):
 
                 # Wait while paused
                 while self._paused and not self._should_stop:
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(self.PAUSE_POLL_INTERVAL)
 
                 if not self._should_stop:
                     await self._upload_single_image(client, image_data)
@@ -286,11 +285,11 @@ class UploadManager(QThread):
                 last_update_time = time.time()
 
                 while not queue.empty() and not self._should_stop:
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(self.PROGRESS_TICK_INTERVAL)
 
                     # Update progress
                     current_time = time.time()
-                    if current_time - last_update_time >= 1:
+                    if current_time - last_update_time >= self.PROGRESS_TICK_INTERVAL:
                         counts = self.state_manager.get_image_counts()
                         uploaded_count = counts.get("uploaded", 0)
                         self.progress_update.emit(uploaded_count, total_images)
@@ -309,6 +308,15 @@ class UploadManager(QThread):
                     # Adjust worker count periodically
                     self._adjust_worker_count()
 
+                # When stopping, drain remaining queue items so join() doesn't hang
+                if self._should_stop:
+                    while not queue.empty():
+                        try:
+                            queue.get_nowait()
+                            queue.task_done()
+                        except asyncio.QueueEmpty:
+                            break
+
                 # Wait for all tasks to complete
                 await queue.join()
 
@@ -320,6 +328,9 @@ class UploadManager(QThread):
                 await asyncio.gather(*workers)
 
                 logger.info("Upload batch completed")
+
+                if self._should_stop:
+                    break
 
                 # Check if there are more images (added during upload)
                 remaining = self.state_manager.get_staged_images()

@@ -1,12 +1,13 @@
 """
 Entry point for DFN image uploader application.
 """
+
 import sys
 import logging
 from pathlib import Path
 from PySide6.QtWidgets import QApplication
 
-from .uploader import UploaderWindow
+from .uploader import UploaderWindow, apply_stylesheet
 
 
 def setup_logging():
@@ -33,6 +34,7 @@ def main():
         app = QApplication(sys.argv)
         app.setApplicationName("DFN Image Uploader")
         app.setOrganizationName("DFN")
+        app.setStyle("Fusion")  # Consistent cross-platform base
 
         window = UploaderWindow()
         window.show()

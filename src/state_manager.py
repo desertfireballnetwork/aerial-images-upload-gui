@@ -1,6 +1,7 @@
 """
 Thread-safe state management using SQLite for persistent image tracking and configuration.
 """
+
 import sqlite3
 import threading
 import json
@@ -118,9 +119,7 @@ class StateManager:
             )
 
             # Create indexes for performance
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_images_status ON images(status)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_images_status ON images(status)")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_images_exif_timestamp ON images(exif_timestamp)"
             )
@@ -147,9 +146,7 @@ class StateManager:
             )
             return cursor.lastrowid
 
-    def update_image_status(
-        self, image_id: int, status: str, error_message: Optional[str] = None
-    ):
+    def update_image_status(self, image_id: int, status: str, error_message: Optional[str] = None):
         """Update image status."""
         with self.transaction() as conn:
             if status == "uploaded":

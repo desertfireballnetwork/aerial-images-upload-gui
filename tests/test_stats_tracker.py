@@ -1,6 +1,7 @@
 """
 Tests for statistics tracking functionality.
 """
+
 import pytest
 import time
 from src.stats_tracker import StatsTracker

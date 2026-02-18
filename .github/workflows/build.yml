@@ -31,8 +31,23 @@ jobs:
           path: .venv
           key: venv-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
 
+      - name: Install Qt system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 \
+            libgl1 \
+            libxkbcommon0 \
+            libdbus-1-3 \
+            libfontconfig1
+
       - name: Install dependencies
         run: poetry install
 
+      - name: Check formatting (black)
+        run: poetry run black --check src/ tests/
+
       - name: Run Tests
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: poetry run pytest --cov=src --cov-report=xml
