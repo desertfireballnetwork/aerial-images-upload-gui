@@ -195,3 +195,35 @@ def test_reset_stuck_uploading_returns_zero_when_none(mock_state_manager):
     """reset_stuck_uploading returns 0 when no images are stuck."""
     mock_state_manager.add_image("fine.jpg", "/tmp/fine.jpg", "survey")
     assert mock_state_manager.reset_stuck_uploading() == 0
+
+
+def test_image_exists_by_path_returns_true(mock_state_manager):
+    """image_exists_by_path returns True for a known staging path."""
+    mock_state_manager.add_image("exists.jpg", "/tmp/staging/exists.jpg", "survey")
+
+    assert mock_state_manager.image_exists_by_path("/tmp/staging/exists.jpg") is True
+
+
+def test_image_exists_by_path_returns_false(mock_state_manager):
+    """image_exists_by_path returns False for an unknown staging path."""
+    assert mock_state_manager.image_exists_by_path("/tmp/staging/ghost.jpg") is False
+
+
+def test_image_exists_by_path_any_status(mock_state_manager):
+    """image_exists_by_path returns True regardless of image status."""
+    image_id = mock_state_manager.add_image("up.jpg", "/tmp/staging/up.jpg", "survey")
+    mock_state_manager.update_image_status(image_id, "uploaded")
+
+    assert mock_state_manager.image_exists_by_path("/tmp/staging/up.jpg") is True
+
+
+def test_get_all_staging_paths(mock_state_manager):
+    """get_all_staging_paths returns a set of all known staging paths."""
+    mock_state_manager.add_image("a.jpg", "/tmp/staging/a.jpg", "survey")
+    mock_state_manager.add_image("b.jpg", "/tmp/staging/b.jpg", "survey")
+
+    paths = mock_state_manager.get_all_staging_paths()
+    assert isinstance(paths, set)
+    assert "/tmp/staging/a.jpg" in paths
+    assert "/tmp/staging/b.jpg" in paths
+    assert "/tmp/staging/unknown.jpg" not in paths

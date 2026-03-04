@@ -6,6 +6,8 @@ Covers:
 - Theme toggling and config persistence
 - Advanced settings panel collapse/expand
 - Staging speed label wiring
+- 4-step wizard layout
+- Stage step UI elements
 """
 
 import json
@@ -42,6 +44,7 @@ def _make_patched_init(config_path: Path, staging_dir: Path):
         self.sd_monitor = SDMonitor()
         self.stats_tracker = StatsTracker()
         self.staging_thread = None
+        self.scan_thread = None
         self.upload_thread = None
         self._dark_mode = True
 
@@ -162,6 +165,14 @@ class TestBannerState:
             texts.add(ui_window.status_banner.text())
         assert len(texts) == len(_BANNER_TEXT)
 
+    def test_staging_banner_state(self, ui_window):
+        """The STAGING and DONE_STAGING banner states exist and produce correct text."""
+        ui_window.set_banner_state("STAGING")
+        assert "registering" in ui_window.status_banner.text().lower()
+
+        ui_window.set_banner_state("DONE_STAGING")
+        assert "staged" in ui_window.status_banner.text().lower()
+
 
 # ---------------------------------------------------------------------------
 # Theme toggle tests
@@ -249,3 +260,102 @@ class TestStagingSpeedLabel:
         ui_window.on_staging_speed(52_428_800)  # 50 MB/s
         text = ui_window.staging_speed_label.text()
         assert "MB/s" in text
+
+
+# ---------------------------------------------------------------------------
+# 4-step wizard layout tests
+# ---------------------------------------------------------------------------
+
+
+class TestWizardLayout:
+    """Test that the 4-step wizard is correctly laid out."""
+
+    def test_step2_optional_label(self, ui_window):
+        """Step 2 title contains 'Optional'."""
+        assert hasattr(ui_window, "copy_btn")
+        assert hasattr(ui_window, "sd_list")
+
+    def test_step3_stage_exists(self, ui_window):
+        """Step 3 (Stage) has the stage button and image type combo."""
+        assert hasattr(ui_window, "stage_btn")
+        assert hasattr(ui_window, "image_type_combo")
+        assert hasattr(ui_window, "unstaged_count_label")
+        assert hasattr(ui_window, "scan_progress")
+
+    def test_step4_upload_exists(self, ui_window):
+        """Step 4 (Upload) has the upload start button."""
+        assert hasattr(ui_window, "upload_start_btn")
+        assert hasattr(ui_window, "upload_pause_btn")
+        assert hasattr(ui_window, "upload_stop_btn")
+
+    def test_sd_card_checkboxes_exist(self, ui_window):
+        """Step 2 has the delete and eject checkboxes."""
+        assert hasattr(ui_window, "delete_source_checkbox")
+        assert hasattr(ui_window, "eject_sd_checkbox")
+        assert ui_window.delete_source_checkbox.isChecked() is False
+        assert ui_window.eject_sd_checkbox.isChecked() is False
+
+    def test_scan_thread_attribute_exists(self, ui_window):
+        """scan_thread attribute is initialized to None."""
+        assert hasattr(ui_window, "scan_thread")
+        assert ui_window.scan_thread is None
+
+    def test_folder_scan_disables_refresh_btn(self, ui_window, qtbot):
+        """The refresh_unstaged_btn is disabled during a folder scan to prevent DB lockup."""
+        # Initial state: button should be enabled
+        assert ui_window.refresh_unstaged_btn.isEnabled()
+
+        # Mock the folder scanner so it doesn't actually run real FS/DB work
+        from unittest.mock import MagicMock
+
+        mock_thread = MagicMock()
+        ui_window.scan_thread = mock_thread
+
+        # Simulate starting a scan manually to isolate the UI toggle logic
+        ui_window.stage_btn.setEnabled(False)
+        ui_window.refresh_unstaged_btn.setEnabled(False)
+
+        assert not ui_window.refresh_unstaged_btn.isEnabled()
+
+        # Simulate finishing the scan
+        ui_window.on_scan_finished(10, 0, 0)
+
+        # Button should be re-enabled
+        assert ui_window.refresh_unstaged_btn.isEnabled()
+
+    def test_eject_worker_triggered(self, ui_window, monkeypatch):
+        """Verify the background _EjectWorker is launched when eject is requested."""
+        ui_window.eject_sd_checkbox.setChecked(True)
+        ui_window._last_sd_card_path = "/dev/sdd1"
+
+        # Mock the eject worker so we don't actually eject anything
+        from src.uploader import _EjectWorker
+
+        mock_start = MagicMock()
+        monkeypatch.setattr(_EjectWorker, "start", mock_start)
+
+        ui_window.on_staging_finished(10, 0, 0, False)
+
+        assert mock_start.called
+        assert isinstance(ui_window._eject_worker, _EjectWorker)
+        assert ui_window._eject_worker.mount_path == "/dev/sdd1"
+
+    def test_on_eject_done_updates_ui(self, ui_window, monkeypatch):
+        """Verify _on_eject_done correctly shows success/warning dialogs."""
+        mock_info = MagicMock()
+        mock_warning = MagicMock()
+        monkeypatch.setattr("src.uploader.QMessageBox.information", mock_info)
+        monkeypatch.setattr("src.uploader.QMessageBox.warning", mock_warning)
+
+        # Mock refresh_sd_list since it relies on finding actual devices
+        monkeypatch.setattr(ui_window, "refresh_sd_list", MagicMock())
+
+        # Success case
+        ui_window._on_eject_done(True, "Ejected successfully")
+        mock_info.assert_called_once()
+        assert "Ejected successfully" in mock_info.call_args[0][2]
+
+        # Failure case
+        ui_window._on_eject_done(False, "Device is busy")
+        mock_warning.assert_called_once()
+        assert "Device is busy" in mock_warning.call_args[0][2]

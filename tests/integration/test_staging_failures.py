@@ -5,7 +5,7 @@ Covers:
 - Low disk space warning (< 10 GB free)
 - Critical disk space that aborts staging (< 5 GB free)
 - File copy failure (IOError during shutil.copy2)
-- Staging failures are recorded in the database
+- Two-step flow: StagingCopier (pure copy) then FolderScanner (DB registration)
 """
 
 import pytest
@@ -16,7 +16,7 @@ from unittest.mock import patch
 from PySide6.QtCore import Qt
 
 from src.state_manager import StateManager
-from src.staging import StagingCopier
+from src.staging import StagingCopier, FolderScanner
 
 from .conftest import create_test_jpeg, wait_for_thread_done, process_events
 
@@ -51,7 +51,6 @@ class TestDiskSpaceWarning:
         monkeypatch.setattr(window.sd_monitor, "get_sd_cards", lambda: [mock_sd_card_info])
         window.refresh_sd_list()
         window.sd_list.setCurrentRow(0)
-        window.image_type_combo.setCurrentText("survey")
 
         fake_usage = _DiskUsage(
             total=500 * 1024**3,
@@ -73,8 +72,9 @@ class TestDiskSpaceWarning:
         assert len(warnings_received) > 0
         assert all(w < 10.0 for w in warnings_received)
 
-        counts = integration_state_manager.get_image_counts()
-        assert counts["staged"] > 0
+        # StagingCopier no longer registers in DB — verify files were copied
+        copied = list(staging_dir.rglob("*.jpg")) + list(staging_dir.rglob("*.JPG"))
+        assert len(copied) > 0
 
     def test_critical_disk_space_aborts_staging(
         self,
@@ -92,7 +92,6 @@ class TestDiskSpaceWarning:
         monkeypatch.setattr(window.sd_monitor, "get_sd_cards", lambda: [mock_sd_card_info])
         window.refresh_sd_list()
         window.sd_list.setCurrentRow(0)
-        window.image_type_combo.setCurrentText("survey")
 
         fake_usage = _DiskUsage(
             total=500 * 1024**3,
@@ -113,14 +112,15 @@ class TestDiskSpaceWarning:
 
         assert len(critical_received) > 0
 
-        counts = integration_state_manager.get_image_counts()
-        assert counts["staged"] <= 1
+        # At most 1 file copied before abort
+        copied = list(staging_dir.rglob("*.jpg")) + list(staging_dir.rglob("*.JPG"))
+        assert len(copied) <= 1
 
 
 class TestCopyFailures:
     """Tests for file copy errors during staging."""
 
-    def test_copy_failure_records_staging_failure(
+    def test_copy_failure_emits_errors(
         self,
         qtbot,
         app_window,
@@ -130,13 +130,12 @@ class TestCopyFailures:
         integration_state_manager,
         monkeypatch,
     ):
-        """When shutil.copy2 raises IOError, the failure is recorded in the DB."""
+        """When shutil.copy2 raises IOError, error signals are emitted."""
         window = app_window
 
         monkeypatch.setattr(window.sd_monitor, "get_sd_cards", lambda: [mock_sd_card_info])
         window.refresh_sd_list()
         window.sd_list.setCurrentRow(0)
-        window.image_type_combo.setCurrentText("survey")
 
         def failing_copy2(src, dst, **kwargs):
             raise IOError("Simulated disk error")
@@ -154,11 +153,9 @@ class TestCopyFailures:
 
         assert len(errors_received) == 5
 
-        failures = integration_state_manager.get_staging_failures()
-        assert len(failures) == 5
-
-        counts = integration_state_manager.get_image_counts()
-        assert counts["staged"] == 0
+        # No files in staging since all copies failed
+        copied = list(staging_dir.rglob("*.jpg")) + list(staging_dir.rglob("*.JPG"))
+        assert len(copied) == 0
 
     def test_partial_copy_failure(
         self,
@@ -176,7 +173,6 @@ class TestCopyFailures:
         monkeypatch.setattr(window.sd_monitor, "get_sd_cards", lambda: [mock_sd_card_info])
         window.refresh_sd_list()
         window.sd_list.setCurrentRow(0)
-        window.image_type_combo.setCurrentText("survey")
 
         import shutil
 
@@ -195,11 +191,9 @@ class TestCopyFailures:
         wait_for_thread_done(qtbot, lambda: window.staging_thread, timeout=15_000)
         process_events()
 
-        counts = integration_state_manager.get_image_counts()
-        assert counts["staged"] == 3
-
-        failures = integration_state_manager.get_staging_failures()
-        assert len(failures) == 2
+        # 3 of 5 files should have been copied successfully
+        copied = list(staging_dir.rglob("*.jpg")) + list(staging_dir.rglob("*.JPG"))
+        assert len(copied) == 3
 
 
 class TestStagingDirectly:
@@ -212,10 +206,66 @@ class TestStagingDirectly:
         staging = tmp_path / "staging_empty"
         staging.mkdir()
 
-        copier = StagingCopier(empty_sd, staging, "survey", integration_state_manager)
+        copier = StagingCopier(empty_sd, staging)
 
         copier.start()
         wait_for_thread_done(qtbot, lambda: copier, timeout=10_000)
 
+        # No files should be copied
+        copied = list(staging.glob("*.jpg"))
+        assert len(copied) == 0
+
+
+class TestFolderScannerIntegration:
+    """Integration tests for the FolderScanner (DB registration step)."""
+
+    def test_copy_then_scan_e2e(self, qtbot, tmp_path, integration_state_manager):
+        """End-to-end: StagingCopier copies files, FolderScanner registers them."""
+        sd = tmp_path / "sd_card"
+        sd.mkdir()
+        staging = tmp_path / "staging_out"
+        staging.mkdir()
+
+        # Create test images on "SD card"
+        for i in range(3):
+            create_test_jpeg(sd / f"IMG_{i:04d}.jpg")
+
+        # Step 1: Copy
+        copier = StagingCopier(sd, staging)
+        copier.start()
+        wait_for_thread_done(qtbot, lambda: copier, timeout=10_000)
+
+        copied = list(staging.glob("*.jpg"))
+        assert len(copied) == 3
+
+        # Step 2: Scan and register
+        scanner = FolderScanner(staging, "survey", integration_state_manager)
+        scanner.start()
+        wait_for_thread_done(qtbot, lambda: scanner, timeout=10_000)
+
         counts = integration_state_manager.get_image_counts()
-        assert counts["staged"] == 0
+        assert counts["staged"] == 3
+
+    def test_scan_skips_already_registered(self, qtbot, tmp_path, integration_state_manager):
+        """FolderScanner skips images already in the DB."""
+        staging = tmp_path / "staging"
+        staging.mkdir()
+
+        # Create and pre-register one image
+        img_path = staging / "IMG_0000.jpg"
+        create_test_jpeg(img_path)
+        integration_state_manager.add_image(
+            filename="IMG_0000.jpg",
+            staging_path=str(img_path),
+            image_type="survey",
+        )
+
+        # Create another un-registered
+        create_test_jpeg(staging / "IMG_0001.jpg")
+
+        scanner = FolderScanner(staging, "survey", integration_state_manager)
+        scanner.start()
+        wait_for_thread_done(qtbot, lambda: scanner, timeout=10_000)
+
+        counts = integration_state_manager.get_image_counts()
+        assert counts["staged"] == 2  # 1 pre-registered + 1 newly scanned

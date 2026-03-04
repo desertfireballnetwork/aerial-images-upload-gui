@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QButtonGroup,
     QComboBox,
+    QCheckBox,
     QFileDialog,
     QMessageBox,
     QTabWidget,
@@ -35,14 +36,14 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
 )
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QTimer, QThread, Signal, Qt
 from PySide6.QtGui import QFont, QColor
 import psutil
 import logging
 
 from .state_manager import StateManager
-from .sd_monitor import SDMonitor
-from .staging import StagingCopier
+from .sd_monitor import SDMonitor, eject_device
+from .staging import StagingCopier, FolderScanner
 from .upload_manager import UploadManager
 from .stats_tracker import StatsTracker
 
@@ -103,19 +104,79 @@ _BANNER_COLORS = {
     "READY": {"dark": "#48484A", "light": "#C7C7CC"},
     "COPYING": {"dark": "#0A84FF", "light": "#0A84FF"},
     "DONE_COPYING": {"dark": "#30D158", "light": "#30D158"},
+    "STAGING": {"dark": "#0A84FF", "light": "#0A84FF"},
+    "DONE_STAGING": {"dark": "#30D158", "light": "#30D158"},
     "UPLOADING": {"dark": "#0A84FF", "light": "#0A84FF"},
     "PAUSED": {"dark": "#FF9F0A", "light": "#FF9F0A"},
     "COMPLETE": {"dark": "#30D158", "light": "#30D158"},
 }
 
 _BANNER_TEXT = {
-    "READY": "Ready — Insert an SD card and follow the steps below",
+    "READY": "Ready — follow the steps below",
     "COPYING": "Copying images from SD card… please wait",
-    "DONE_COPYING": "Copy complete — you can now start the upload (Step 3)",
+    "DONE_COPYING": "Copy complete — now stage the images in Step 3",
+    "STAGING": "Scanning and registering images… please wait",
+    "DONE_STAGING": "Images staged — you can now start the upload (Step 4)",
     "UPLOADING": "Uploading images to the server…",
     "PAUSED": "Upload paused — press Resume to continue",
     "COMPLETE": "All images uploaded successfully!",
 }
+
+
+class _EjectWorker(QThread):
+    """Run SD card eject in a background thread to avoid blocking the UI."""
+
+    done = Signal(bool, str)
+
+    def __init__(self, mount_path: str):
+        super().__init__()
+        self.mount_path = mount_path
+
+    def run(self):
+        success, msg = eject_device(self.mount_path)
+        self.done.emit(success, msg)
+
+
+class _UnstagedCounter(QThread):
+    """Background worker to count unstaged images without blocking the UI."""
+
+    result_ready = Signal(str)
+
+    def __init__(self, staging_dir_text: str, state_manager, parent=None):
+        super().__init__(parent)
+        self._staging_dir_text = staging_dir_text
+        self._state_manager = state_manager
+
+    def run(self):
+        from .staging import IMAGE_EXTENSIONS
+
+        staging_dir = Path(self._staging_dir_text)
+        if not staging_dir.exists():
+            self.result_ready.emit("Folder not found")
+            return
+
+        try:
+            image_paths = []
+            for ext in {e.lower() for e in IMAGE_EXTENSIONS}:
+                if self.isInterruptionRequested():
+                    return
+                pattern = (
+                    f"*{''.join(f'[{c.lower()}{c.upper()}]' if c.isalpha() else c for c in ext)}"
+                )
+                image_paths.extend(staging_dir.rglob(pattern))
+
+            # De-duplicate while preserving order, and ensure we only keep files
+            all_images = [p for p in dict.fromkeys(image_paths) if p.is_file()]
+
+            known_paths = self._state_manager.get_all_staging_paths()
+            unstaged = sum(1 for p in all_images if str(p) not in known_paths)
+
+            total = len(all_images)
+            text = f"{unstaged} un-staged image(s) found ({total} total in folder)"
+        except Exception as e:
+            text = f"Error scanning: {e}"
+
+        self.result_ready.emit(text)
 
 
 def _build_stylesheet(p: dict) -> str:
@@ -286,6 +347,16 @@ def _build_stylesheet(p: dict) -> str:
         font-size: 11pt;
     }}
     QPushButton[objectName="copy_btn"]:hover {{
+        background-color: {p['primary_hover']};
+    }}
+    QPushButton[objectName="stage_btn"] {{
+        background-color: {p['primary']};
+        color: #FFFFFF;
+        border: none;
+        min-height: 38px;
+        font-size: 11pt;
+    }}
+    QPushButton[objectName="stage_btn"]:hover {{
         background-color: {p['primary_hover']};
     }}
     QPushButton[objectName="upload_start_btn"] {{
@@ -488,6 +559,7 @@ class UploaderWindow(QMainWindow):
         self.sd_monitor = SDMonitor()
         self.stats_tracker = StatsTracker()
         self.staging_thread = None
+        self.scan_thread = None
         self.upload_thread = None
 
         # Theme state (default dark)
@@ -562,13 +634,17 @@ class UploaderWindow(QMainWindow):
         step1 = self._create_step1()
         scroll_layout.addWidget(step1)
 
-        # STEP 2 — Copy from SD Card
+        # STEP 2 — Copy from SD Card (Optional)
         step2 = self._create_step2()
         scroll_layout.addWidget(step2)
 
-        # STEP 3 — Upload to Server
-        step3 = self._create_step3()
+        # STEP 3 — Stage Images for Upload
+        step3 = self._create_step3_stage()
         scroll_layout.addWidget(step3)
+
+        # STEP 4 — Upload to Server
+        step4 = self._create_step4()
+        scroll_layout.addWidget(step4)
 
         # Tabs for errors and logs
         self.tabs = QTabWidget()
@@ -629,16 +705,17 @@ class UploaderWindow(QMainWindow):
         group.setLayout(layout)
         return group
 
-    # ---- Step 2: Copy from SD Card ------------------------------------
+    # ---- Step 2: Copy from SD Card (Optional) -------------------------
 
     def _create_step2(self):
-        group = QGroupBox("STEP 2 — Copy from SD Card")
+        group = QGroupBox("STEP 2 — Copy from SD Card (Optional)")
         layout = QVBoxLayout()
         layout.setSpacing(6)
 
         help_label = QLabel(
-            "Insert the SD card from your drone. Wait for it to appear in the list "
-            "below, select it, choose the image type, then press Copy."
+            "Optional — skip this step if images are already in your Local Storage Folder. "
+            "Insert the SD card from your drone, wait for it to appear below, "
+            "then press Copy."
         )
         help_label.setObjectName("help_text")
         help_label.setWordWrap(True)
@@ -659,25 +736,23 @@ class UploaderWindow(QMainWindow):
         list_layout.addWidget(self.sd_refresh_btn)
         layout.addLayout(list_layout)
 
-        # Image type
-        type_layout = QHBoxLayout()
-        type_layout.addWidget(QLabel("Image Type:"))
-        self.image_type_combo = QComboBox()
-        self.image_type_combo.addItems(
-            [
-                "survey",
-                "training_true",
-                "training_false",
-            ]
+        # Checkboxes for post-copy actions
+        checkbox_layout = QHBoxLayout()
+        self.delete_source_checkbox = QCheckBox("Delete images from SD card after copy")
+        self.delete_source_checkbox.setChecked(False)
+        self.delete_source_checkbox.setToolTip(
+            "If checked, images will be removed from the SD card after a verified copy."
         )
-        self.image_type_combo.setToolTip("Choose what kind of flight this SD card is from.")
-        type_layout.addWidget(self.image_type_combo)
-        self.image_type_desc = QLabel("Survey flight images")
-        self.image_type_desc.setObjectName("help_text")
-        type_layout.addWidget(self.image_type_desc)
-        type_layout.addStretch()
-        layout.addLayout(type_layout)
-        self.image_type_combo.currentTextChanged.connect(self._update_image_type_desc)
+        checkbox_layout.addWidget(self.delete_source_checkbox)
+
+        self.eject_sd_checkbox = QCheckBox("Eject SD card when done")
+        self.eject_sd_checkbox.setChecked(False)
+        self.eject_sd_checkbox.setToolTip(
+            "If checked, the SD card will be safely ejected after copying is complete."
+        )
+        checkbox_layout.addWidget(self.eject_sd_checkbox)
+        checkbox_layout.addStretch()
+        layout.addLayout(checkbox_layout)
 
         # Copy button — full width, primary action colour
         self.copy_btn = QPushButton("📋  Copy Images from SD Card")
@@ -703,15 +778,86 @@ class UploaderWindow(QMainWindow):
         group.setLayout(layout)
         return group
 
-    # ---- Step 3: Upload to Server -------------------------------------
+    # ---- Step 3: Stage Images for Upload -------------------------------
 
-    def _create_step3(self):
-        group = QGroupBox("STEP 3 — Upload to Server")
+    def _create_step3_stage(self):
+        group = QGroupBox("STEP 3 — Stage Images for Upload")
         layout = QVBoxLayout()
         layout.setSpacing(6)
 
         help_label = QLabel(
-            "Once images are copied, press Start Upload. You can pause and "
+            "Stage the images in your Local Storage Folder so they can be uploaded. "
+            "Choose the image type, then press Stage. Only un-staged images will be registered."
+        )
+        help_label.setObjectName("help_text")
+        help_label.setWordWrap(True)
+        layout.addWidget(help_label)
+
+        # Un-staged count
+        count_layout = QHBoxLayout()
+        self.unstaged_count_label = QLabel("Scanning…")
+        self.unstaged_count_label.setObjectName("stat_value")
+        count_layout.addWidget(self.unstaged_count_label)
+        self.refresh_unstaged_btn = QPushButton("Refresh Count")
+        self.refresh_unstaged_btn.clicked.connect(self.update_unstaged_count)
+        self.refresh_unstaged_btn.setToolTip("Re-scan the local storage folder for new images.")
+        count_layout.addWidget(self.refresh_unstaged_btn)
+        count_layout.addStretch()
+        layout.addLayout(count_layout)
+
+        # Image type
+        type_layout = QHBoxLayout()
+        type_layout.addWidget(QLabel("Image Type:"))
+        self.image_type_combo = QComboBox()
+        self.image_type_combo.addItems(
+            [
+                "survey",
+                "training_true",
+                "training_false",
+            ]
+        )
+        self.image_type_combo.setToolTip("Choose what kind of flight these images are from.")
+        type_layout.addWidget(self.image_type_combo)
+        self.image_type_desc = QLabel("Survey flight images")
+        self.image_type_desc.setObjectName("help_text")
+        type_layout.addWidget(self.image_type_desc)
+        type_layout.addStretch()
+        layout.addLayout(type_layout)
+        self.image_type_combo.currentTextChanged.connect(self._update_image_type_desc)
+
+        # Stage button — full width, primary action colour
+        self.stage_btn = QPushButton("📂  Stage Images for Upload")
+        self.stage_btn.setObjectName("stage_btn")
+        self.stage_btn.clicked.connect(self.start_folder_scan)
+        self.stage_btn.setToolTip(
+            "Scans your Local Storage Folder and registers un-staged images for upload."
+        )
+        layout.addWidget(self.stage_btn)
+
+        # Progress
+        self.scan_progress = QProgressBar()
+        layout.addWidget(self.scan_progress)
+
+        self.scan_status_label = QLabel()
+        self.scan_status_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        layout.addWidget(self.scan_status_label)
+
+        group.setLayout(layout)
+
+        # Initial count update (deferred so UI is built first)
+        QTimer.singleShot(500, self.update_unstaged_count)
+
+        return group
+
+    # ---- Step 4: Upload to Server -------------------------------------
+
+    def _create_step4(self):
+        group = QGroupBox("STEP 4 — Upload to Server")
+        layout = QVBoxLayout()
+        layout.setSpacing(6)
+
+        help_label = QLabel(
+            "Once images are staged, press Start Upload. You can pause and "
             "resume at any time without losing progress."
         )
         help_label.setObjectName("help_text")
@@ -1105,23 +1251,25 @@ class UploaderWindow(QMainWindow):
             return
 
         sd_card = cards[selected_idx]
-        image_type = self.image_type_combo.currentText()
+        delete_source = self.delete_source_checkbox.isChecked()
 
         msg = (
             f"Ready to copy images?\n\n"
             f"From:  {sd_card.path}\n"
             f"To:  {staging_dir}\n"
-            f"Type:  {image_type}\n"
             f"Images found:  ~{sd_card.count_images()}"
         )
+        if delete_source:
+            msg += "\n\n⚠️  Images will be DELETED from the SD card after copying."
         reply = QMessageBox.question(self, "Confirm Copy", msg, QMessageBox.Yes | QMessageBox.No)
         if reply != QMessageBox.Yes:
             return
 
+        # Remember the SD card path for post-copy eject
+        self._last_sd_card_path = str(sd_card.path)
+
         # Start staging thread
-        self.staging_thread = StagingCopier(
-            sd_card.path, staging_dir, image_type, self.state_manager
-        )
+        self.staging_thread = StagingCopier(sd_card.path, staging_dir, delete_source=delete_source)
         self.staging_thread.progress.connect(self.on_staging_progress)
         self.staging_thread.speed_update.connect(self.on_staging_speed)
         self.staging_thread.finished.connect(self.on_staging_finished)
@@ -1146,24 +1294,53 @@ class UploaderWindow(QMainWindow):
         speed_str = self.stats_tracker.format_rate(bytes_per_sec)
         self.staging_speed_label.setText(speed_str)
 
-    def on_staging_finished(self, successful, failed):
+    def on_staging_finished(self, successful, failed, skipped, aborted):
         """Handle staging completion."""
         self.copy_btn.setEnabled(True)
         self.staging_progress.setValue(0)
         self.staging_status_label.setText("")
         self.staging_speed_label.setText("")
 
-        msg = (
-            f"Copy complete!\n\n"
-            f"Successful:  {successful}\n"
-            f"Failed:  {failed}\n\n"
-            f"You can now start the upload in Step 3."
-        )
-        QMessageBox.information(self, "Copy Complete", msg)
-        self.log(f"Staging completed: {successful} successful, {failed} failed")
+        title = "Copy Stopped" if aborted else "Copy Complete"
+        if aborted:
+            msg = "Copy was stopped early.\n\n"
+        else:
+            msg = "Copy complete!\n\n"
+
+        msg += f"Successfully copied:  {successful}\n" f"Already copied (skipped):  {skipped}\n"
+        if failed:
+            msg += f"Failed to copy:  {failed}\n"
+            title += " (with errors)"
+
+        msg += "\nNow go to Step 3 to stage the images for upload."
+
+        if aborted or failed:
+            QMessageBox.warning(self, title, msg)
+        else:
+            QMessageBox.information(self, title, msg)
+
+        status_word = "stopped" if aborted else "completed"
+        self.log(f"Copy {status_word}: {successful} successful, {skipped} skipped, {failed} failed")
 
         self.set_banner_state("DONE_COPYING")
-        self.update_counts()
+        self.update_unstaged_count()
+
+        # Eject SD card if requested (runs in background thread)
+        if self.eject_sd_checkbox.isChecked() and hasattr(self, "_last_sd_card_path"):
+            self.log("Ejecting SD card…")
+            self._eject_worker = _EjectWorker(self._last_sd_card_path)
+            self._eject_worker.done.connect(self._on_eject_done)
+            self._eject_worker.start()
+
+    def _on_eject_done(self, success, msg):
+        """Handle eject worker completion (runs on UI thread via signal)."""
+        if success:
+            QMessageBox.information(self, "SD Card Ejected", msg)
+            self.log(msg)
+            self.refresh_sd_list()
+        else:
+            QMessageBox.warning(self, "Eject Failed", msg)
+            self.log(f"Eject failed: {msg}")
 
     def on_staging_error(self, filename, error):
         """Handle staging error."""
@@ -1188,6 +1365,90 @@ class UploaderWindow(QMainWindow):
         )
         QMessageBox.critical(self, "Disk Space Critical", msg)
         self.log(f"Critical: Only {gb_remaining:.1f} GB remaining! Stopping copy.")
+
+    # ------------------------------------------------------------------
+    # Folder scan (Stage step)
+    # ------------------------------------------------------------------
+
+    def start_folder_scan(self):
+        """Start scanning the staging folder and registering images."""
+        staging_dir = Path(self.staging_dir_edit.text())
+        if not staging_dir.exists():
+            QMessageBox.warning(
+                self,
+                "Folder Not Found",
+                f"The local storage folder does not exist:\n{staging_dir}\n\n"
+                "Please set it in Step 1.",
+            )
+            return
+
+        image_type = self.image_type_combo.currentText()
+
+        self.scan_thread = FolderScanner(staging_dir, image_type, self.state_manager)
+        self.scan_thread.progress.connect(self.on_scan_progress)
+        self.scan_thread.finished.connect(self.on_scan_finished)
+
+        self.stage_btn.setEnabled(False)
+        self.refresh_unstaged_btn.setEnabled(False)
+        self.scan_progress.setValue(0)
+        self.scan_status_label.setText("")
+        self.scan_thread.start()
+        self.set_banner_state("STAGING")
+        self.log(f"Scanning staging folder for {image_type} images…")
+
+    def on_scan_progress(self, current, total, filename):
+        """Handle folder scan progress update."""
+        self.scan_progress.setMaximum(total)
+        self.scan_progress.setValue(current)
+        self.scan_status_label.setText(f"{current}/{total}: {filename}")
+
+    def on_scan_finished(self, registered, skipped, failed):
+        """Handle folder scan completion."""
+        self.stage_btn.setEnabled(True)
+        self.refresh_unstaged_btn.setEnabled(True)
+        self.scan_progress.setValue(0)
+        self.scan_status_label.setText("")
+
+        msg = (
+            f"Staging complete!\n\n"
+            f"Newly registered:  {registered}\n"
+            f"Already staged:  {skipped}\n"
+        )
+        if failed:
+            msg += f"Failed to register:  {failed}\n"
+        msg += f"\nYou can now start the upload in Step 4."
+
+        if failed:
+            QMessageBox.warning(self, "Staging Complete (with errors)", msg)
+        else:
+            QMessageBox.information(self, "Staging Complete", msg)
+        self.log(f"Staging completed: {registered} registered, {skipped} skipped, {failed} failed")
+
+        self.set_banner_state("DONE_STAGING")
+        self.update_counts()
+        self.update_unstaged_count()
+
+    def update_unstaged_count(self):
+        """Count images in staging dir that are not yet registered in the DB.
+        Runs the potentially expensive scan in a background thread
+        to avoid freezing the UI.
+        """
+        # Avoid launching multiple concurrent scans.
+        worker = getattr(self, "_unstaged_counter_thread", None)
+        if worker is not None and worker.isRunning():
+            return
+
+        self.unstaged_count_label.setText("Scanning staging folder...")
+
+        worker = _UnstagedCounter(
+            self.staging_dir_edit.text(),
+            self.state_manager,
+            self,
+        )
+        self._unstaged_counter_thread = worker
+        worker.result_ready.connect(self.unstaged_count_label.setText)
+        worker.finished.connect(lambda: setattr(self, "_unstaged_counter_thread", None))
+        worker.start()
 
     # ------------------------------------------------------------------
     # Upload
@@ -1217,7 +1478,7 @@ class UploaderWindow(QMainWindow):
             QMessageBox.information(
                 self,
                 "Nothing to Upload",
-                "No images have been copied yet. Complete Step 2 first.",
+                "No images have been staged yet. Complete Step 3 first.",
             )
             return
 
@@ -1410,8 +1671,30 @@ class UploaderWindow(QMainWindow):
             self.staging_thread.stop()
             self.staging_thread.wait()
 
+        if self.scan_thread and self.scan_thread.isRunning():
+            self.scan_thread.stop()
+            self.scan_thread.wait()
+
         if self.upload_thread and self.upload_thread.isRunning():
             self.upload_thread.stop()
             self.upload_thread.wait()
+
+        # Stop async background workers to prevent "Destroyed while thread is still running"
+        if getattr(self, "_eject_worker", None) and self._eject_worker.isRunning():
+            self._eject_worker.requestInterruption()
+            if not self._eject_worker.wait(2000):
+                logger.warning("Eject worker did not stop within 2 seconds; forcing termination")
+                self._eject_worker.terminate()
+                self._eject_worker.wait(1000)
+
+        counter_worker = getattr(self, "_unstaged_counter_thread", None)
+        if counter_worker and counter_worker.isRunning():
+            counter_worker.requestInterruption()
+            if not counter_worker.wait(2000):
+                logger.warning(
+                    "Unstaged counter worker did not stop within 2 seconds; forcing termination"
+                )
+                counter_worker.terminate()
+                counter_worker.wait(1000)
 
         event.accept()
