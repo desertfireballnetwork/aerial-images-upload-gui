@@ -278,6 +278,10 @@ def app_window(
         window.staging_thread.stop()
         window.staging_thread.wait(5000)
 
+    if window.scan_thread and window.scan_thread.isRunning():
+        window.scan_thread.stop()
+        window.scan_thread.wait(5000)
+
     if window.upload_thread and window.upload_thread.isRunning():
         window.upload_thread.stop()
         window.upload_thread.wait(5000)
@@ -302,6 +306,7 @@ def _make_patched_init(config_path: Path, staging_dir: Path):
         self.sd_monitor = SDMonitor()
         self.stats_tracker = StatsTracker()
         self.staging_thread = None
+        self.scan_thread = None
         self.upload_thread = None
         self._dark_mode = True
 

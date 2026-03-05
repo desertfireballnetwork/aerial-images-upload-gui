@@ -3,8 +3,10 @@ Cross-platform SD card detection and monitoring.
 """
 
 import psutil
+import subprocess
+import sys
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 import logging
 
 logger = logging.getLogger(__name__)
@@ -59,6 +61,109 @@ class SDCardInfo:
 
     def __repr__(self):
         return f"SDCardInfo(path={self.path}, total={self.total_gb:.1f}GB, images={self.count_images()})"
+
+
+def eject_device(mount_point: str) -> Tuple[bool, str]:
+    """
+    Attempt to eject / unmount a removable device.
+
+    Args:
+        mount_point: The mount path of the device (e.g. /media/user/SDCARD).
+
+    Returns:
+        (success, message) — success is True if the eject command succeeded,
+        message contains the output or error details.
+    """
+    mount_point = str(mount_point)
+    try:
+        if sys.platform.startswith("linux"):
+            # The mount point might disappear from psutil after unmounting,
+            # so we must determine the block device path beforehand.
+            dev_path = _device_for_mount(mount_point)
+
+            # Try udisksctl first (most desktop Linux distros)
+            result = subprocess.run(
+                ["udisksctl", "unmount", "-b", dev_path],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                # Now power-off the drive
+                power_off_result = subprocess.run(
+                    ["udisksctl", "power-off", "-b", dev_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                if power_off_result.returncode == 0:
+                    return True, "SD card ejected successfully. You can safely remove it."
+                warning_msg = (
+                    "SD card was unmounted, but powering off the device failed: "
+                    f"{power_off_result.stderr.strip()}"
+                )
+                logger.warning(warning_msg)
+                return False, warning_msg
+            # Fallback to umount
+            result = subprocess.run(
+                ["umount", mount_point],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                return True, "SD card unmounted. You can safely remove it."
+            return False, f"Could not eject: {result.stderr.strip()}"
+
+        elif sys.platform == "darwin":
+            result = subprocess.run(
+                ["diskutil", "eject", mount_point],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                return True, "SD card ejected successfully. You can safely remove it."
+            return False, f"Could not eject: {result.stderr.strip()}"
+
+        elif sys.platform == "win32":
+            # Use PowerShell to eject removable drive
+            drive_letter = mount_point[0]
+            ps_script = (
+                f"$driveEject = New-Object -comObject Shell.Application; "
+                f'$driveEject.Namespace(17).ParseName("{drive_letter}:").InvokeVerb("Eject")'
+            )
+            result = subprocess.run(
+                ["powershell", "-Command", ps_script],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                return True, "SD card ejected successfully. You can safely remove it."
+            return False, f"Could not eject: {result.stderr.strip()}"
+
+        else:
+            return False, f"Eject not supported on this platform ({sys.platform})."
+
+    except FileNotFoundError as e:
+        return False, f"Eject tool not found: {e}"
+    except subprocess.TimeoutExpired:
+        return False, "Eject timed out. The SD card may be busy."
+    except Exception as e:
+        return False, f"Eject failed: {e}"
+
+
+def _device_for_mount(mount_point: str) -> str:
+    """Find the block device path for a given mount point."""
+    try:
+        partitions = psutil.disk_partitions(all=False)
+        for p in partitions:
+            if p.mountpoint == mount_point:
+                return p.device
+    except Exception:
+        pass
+    return mount_point
 
 
 class SDMonitor:

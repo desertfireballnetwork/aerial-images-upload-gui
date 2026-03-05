@@ -320,6 +320,23 @@ class StateManager:
             )
             return cursor.rowcount
 
+    def image_exists_by_path(self, staging_path: str) -> bool:
+        """Check if an image with the given staging path already exists in the database."""
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                """
+                SELECT 1 FROM images WHERE staging_path = ? LIMIT 1
+                """,
+                (staging_path,),
+            )
+            return cursor.fetchone() is not None
+
+    def get_all_staging_paths(self) -> set:
+        """Return a set of all staging_path values in the images table (any status)."""
+        with self.transaction() as conn:
+            cursor = conn.execute("SELECT staging_path FROM images")
+            return {row[0] for row in cursor.fetchall()}
+
     def delete_uploaded_image_record(self, image_id: int):
         """Delete an uploaded image record (for cleanup)."""
         with self.transaction() as conn:
