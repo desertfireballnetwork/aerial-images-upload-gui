@@ -1,6 +1,8 @@
 """Unit tests for UploadManager._adjust_worker_count (no QThread started)."""
 
 import time
+from pathlib import Path
+from unittest.mock import AsyncMock
 import pytest
 from unittest.mock import MagicMock, patch
 from src.upload_manager import UploadManager
@@ -202,3 +204,59 @@ class TestIsPermanentFailure:
 
     def test_error_body_is_not_permanent(self, manager):
         assert manager._is_permanent_failure("ERROR - something") is False
+
+
+@pytest.mark.asyncio
+async def test_upload_single_image_uses_image_upload_key(tmp_path, manager):
+    """Upload/check calls must use the per-image upload_key from DB row data."""
+    image_file = tmp_path / "img.jpg"
+    image_file.write_bytes(b"abc")
+
+    image_data = {
+        "id": 1,
+        "filename": "img.jpg",
+        "staging_path": str(image_file),
+        "image_type": "survey",
+        "upload_key": "survey-key-row",
+        "file_size": 3,
+    }
+
+    client = MagicMock()
+    client.check_image_uploaded = AsyncMock(return_value=False)
+    client.upload_image = AsyncMock(return_value=(True, "SUCCESS"))
+
+    result = await manager._upload_single_image(client, image_data)
+
+    assert result is True
+    client.check_image_uploaded.assert_called_once_with("survey-key-row", "img.jpg")
+    client.upload_image.assert_called_once()
+    call_args = client.upload_image.call_args.args
+    assert call_args[0] == "survey-key-row"
+    assert call_args[1] == "survey"
+    assert isinstance(call_args[2], Path)
+
+
+@pytest.mark.asyncio
+async def test_upload_single_image_missing_upload_key_fails_fast(tmp_path, manager):
+    """Legacy rows without upload_key are failed without any API calls."""
+    image_file = tmp_path / "img.jpg"
+    image_file.write_bytes(b"abc")
+
+    image_data = {
+        "id": 2,
+        "filename": "img.jpg",
+        "staging_path": str(image_file),
+        "image_type": "survey",
+        "upload_key": "",
+        "file_size": 3,
+    }
+
+    client = MagicMock()
+    client.check_image_uploaded = AsyncMock()
+    client.upload_image = AsyncMock()
+
+    result = await manager._upload_single_image(client, image_data)
+
+    assert result is False
+    assert client.check_image_uploaded.call_count == 0
+    assert client.upload_image.call_count == 0

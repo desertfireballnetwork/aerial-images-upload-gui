@@ -184,6 +184,7 @@ def _pre_stage_images(
     staging_dir: Path,
     n: int = 5,
     image_type: str = "survey",
+    upload_key: str = "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
 ) -> List[Dict]:
     """Create N staged images directly in DB + on disk."""
     images = []
@@ -195,6 +196,7 @@ def _pre_stage_images(
         image_id = state_manager.add_image(
             filename=fname,
             staging_path=str(fpath),
+            upload_key=upload_key,
             image_type=image_type,
             exif_timestamp=f"2025-06-15T10:{30 + i:02d}:00",
             file_size=file_size,

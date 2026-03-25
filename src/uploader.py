@@ -1383,8 +1383,16 @@ class UploaderWindow(QMainWindow):
             return
 
         image_type = self.image_type_combo.currentText()
+        upload_key = self.upload_key_edit.text().strip()
+        if not upload_key:
+            QMessageBox.warning(
+                self,
+                "Upload Key Missing",
+                "Please enter your Upload Key in Step 1 before staging images.",
+            )
+            return
 
-        self.scan_thread = FolderScanner(staging_dir, image_type, self.state_manager)
+        self.scan_thread = FolderScanner(staging_dir, image_type, upload_key, self.state_manager)
         self.scan_thread.progress.connect(self.on_scan_progress)
         self.scan_thread.finished.connect(self.on_scan_finished)
 

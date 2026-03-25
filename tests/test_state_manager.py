@@ -1,6 +1,7 @@
 """Tests for state management functionality."""
 
 import pytest
+import sqlite3
 from src.state_manager import StateManager
 
 
@@ -9,6 +10,7 @@ def test_add_image(mock_state_manager):
     image_id = mock_state_manager.add_image(
         filename="test_unique_xyz.jpg",
         staging_path="/tmp/test_unique_xyz.jpg",
+        upload_key="survey-key-1",
         image_type="survey",
         exif_timestamp="2026-01-20T10:30:00",
         file_size=1024000,
@@ -20,6 +22,7 @@ def test_add_image(mock_state_manager):
     added = next((i for i in images if i["filename"] == "test_unique_xyz.jpg"), None)
     assert added is not None
     assert added["image_type"] == "survey"
+    assert added["upload_key"] == "survey-key-1"
 
 
 def test_update_image_status(mock_state_manager):
@@ -27,6 +30,7 @@ def test_update_image_status(mock_state_manager):
     image_id = mock_state_manager.add_image(
         filename="test.jpg",
         staging_path="/tmp/test.jpg",
+        upload_key="survey-key-1",
         image_type="survey",
     )
 
@@ -38,9 +42,9 @@ def test_update_image_status(mock_state_manager):
 
 def test_get_image_counts(mock_state_manager):
     """Test getting image counts by status."""
-    mock_state_manager.add_image("img1.jpg", "/tmp/img1.jpg", "survey")
-    mock_state_manager.add_image("img2.jpg", "/tmp/img2.jpg", "survey")
-    id3 = mock_state_manager.add_image("img3.jpg", "/tmp/img3.jpg", "survey")
+    mock_state_manager.add_image("img1.jpg", "/tmp/img1.jpg", "survey-key-1", "survey")
+    mock_state_manager.add_image("img2.jpg", "/tmp/img2.jpg", "survey-key-1", "survey")
+    id3 = mock_state_manager.add_image("img3.jpg", "/tmp/img3.jpg", "survey-key-1", "survey")
 
     mock_state_manager.update_image_status(id3, "failed", "Test error")
 
@@ -79,13 +83,25 @@ def test_config_storage(mock_state_manager):
 def test_timestamp_ordering(mock_state_manager):
     """Test that images are ordered by EXIF timestamp."""
     mock_state_manager.add_image(
-        "img2.jpg", "/tmp/img2.jpg", "survey", exif_timestamp="2026-01-20T12:00:00"
+        filename="img2.jpg",
+        staging_path="/tmp/img2.jpg",
+        upload_key="survey-key-1",
+        image_type="survey",
+        exif_timestamp="2026-01-20T12:00:00",
     )
     mock_state_manager.add_image(
-        "img1.jpg", "/tmp/img1.jpg", "survey", exif_timestamp="2026-01-20T10:00:00"
+        filename="img1.jpg",
+        staging_path="/tmp/img1.jpg",
+        upload_key="survey-key-1",
+        image_type="survey",
+        exif_timestamp="2026-01-20T10:00:00",
     )
     mock_state_manager.add_image(
-        "img3.jpg", "/tmp/img3.jpg", "survey", exif_timestamp="2026-01-20T14:00:00"
+        filename="img3.jpg",
+        staging_path="/tmp/img3.jpg",
+        upload_key="survey-key-1",
+        image_type="survey",
+        exif_timestamp="2026-01-20T14:00:00",
     )
 
     images = mock_state_manager.get_staged_images()
@@ -122,7 +138,7 @@ def test_get_upload_stats_multiple_records(mock_state_manager):
 
 def test_delete_uploaded_image_record(mock_state_manager):
     """delete_uploaded_image_record removes only uploaded images."""
-    image_id = mock_state_manager.add_image("del.jpg", "/tmp/del.jpg", "survey")
+    image_id = mock_state_manager.add_image("del.jpg", "/tmp/del.jpg", "survey-key-1", "survey")
     mock_state_manager.update_image_status(image_id, "uploaded")
 
     counts_before = mock_state_manager.get_image_counts()
@@ -137,7 +153,7 @@ def test_delete_uploaded_image_record(mock_state_manager):
 def test_delete_non_uploaded_record_is_noop(mock_state_manager):
     """delete_uploaded_image_record on a staged image does nothing."""
     image_id = mock_state_manager.add_image(
-        "keep_unique_noop.jpg", "/tmp/keep_unique_noop.jpg", "survey"
+        "keep_unique_noop.jpg", "/tmp/keep_unique_noop.jpg", "survey-key-1", "survey"
     )
 
     mock_state_manager.delete_uploaded_image_record(image_id)
@@ -150,7 +166,7 @@ def test_delete_non_uploaded_record_is_noop(mock_state_manager):
 def test_increment_retry_count(mock_state_manager):
     """increment_retry_count bumps the retry counter."""
     image_id = mock_state_manager.add_image(
-        "retry_unique_abc.jpg", "/tmp/retry_unique_abc.jpg", "survey"
+        "retry_unique_abc.jpg", "/tmp/retry_unique_abc.jpg", "survey-key-1", "survey"
     )
 
     mock_state_manager.increment_retry_count(image_id)
@@ -163,9 +179,9 @@ def test_increment_retry_count(mock_state_manager):
 
 def test_reset_stuck_uploading(mock_state_manager):
     """reset_stuck_uploading moves 'uploading' images back to 'staged'."""
-    id1 = mock_state_manager.add_image("stuck1.jpg", "/tmp/stuck1.jpg", "survey")
-    id2 = mock_state_manager.add_image("stuck2.jpg", "/tmp/stuck2.jpg", "survey")
-    id3 = mock_state_manager.add_image("ok.jpg", "/tmp/ok.jpg", "survey")
+    id1 = mock_state_manager.add_image("stuck1.jpg", "/tmp/stuck1.jpg", "survey-key-1", "survey")
+    id2 = mock_state_manager.add_image("stuck2.jpg", "/tmp/stuck2.jpg", "survey-key-1", "survey")
+    id3 = mock_state_manager.add_image("ok.jpg", "/tmp/ok.jpg", "survey-key-1", "survey")
 
     mock_state_manager.update_image_status(id1, "uploading")
     mock_state_manager.update_image_status(id2, "uploading")
@@ -181,7 +197,7 @@ def test_reset_stuck_uploading(mock_state_manager):
 
 def test_reset_stuck_uploading_clears_error_message(mock_state_manager):
     """reset_stuck_uploading clears any error_message on reset images."""
-    image_id = mock_state_manager.add_image("err.jpg", "/tmp/err.jpg", "survey")
+    image_id = mock_state_manager.add_image("err.jpg", "/tmp/err.jpg", "survey-key-1", "survey")
     mock_state_manager.update_image_status(image_id, "uploading", "partial upload")
 
     mock_state_manager.reset_stuck_uploading()
@@ -193,13 +209,13 @@ def test_reset_stuck_uploading_clears_error_message(mock_state_manager):
 
 def test_reset_stuck_uploading_returns_zero_when_none(mock_state_manager):
     """reset_stuck_uploading returns 0 when no images are stuck."""
-    mock_state_manager.add_image("fine.jpg", "/tmp/fine.jpg", "survey")
+    mock_state_manager.add_image("fine.jpg", "/tmp/fine.jpg", "survey-key-1", "survey")
     assert mock_state_manager.reset_stuck_uploading() == 0
 
 
 def test_image_exists_by_path_returns_true(mock_state_manager):
     """image_exists_by_path returns True for a known staging path."""
-    mock_state_manager.add_image("exists.jpg", "/tmp/staging/exists.jpg", "survey")
+    mock_state_manager.add_image("exists.jpg", "/tmp/staging/exists.jpg", "survey-key-1", "survey")
 
     assert mock_state_manager.image_exists_by_path("/tmp/staging/exists.jpg") is True
 
@@ -211,7 +227,9 @@ def test_image_exists_by_path_returns_false(mock_state_manager):
 
 def test_image_exists_by_path_any_status(mock_state_manager):
     """image_exists_by_path returns True regardless of image status."""
-    image_id = mock_state_manager.add_image("up.jpg", "/tmp/staging/up.jpg", "survey")
+    image_id = mock_state_manager.add_image(
+        "up.jpg", "/tmp/staging/up.jpg", "survey-key-1", "survey"
+    )
     mock_state_manager.update_image_status(image_id, "uploaded")
 
     assert mock_state_manager.image_exists_by_path("/tmp/staging/up.jpg") is True
@@ -219,11 +237,69 @@ def test_image_exists_by_path_any_status(mock_state_manager):
 
 def test_get_all_staging_paths(mock_state_manager):
     """get_all_staging_paths returns a set of all known staging paths."""
-    mock_state_manager.add_image("a.jpg", "/tmp/staging/a.jpg", "survey")
-    mock_state_manager.add_image("b.jpg", "/tmp/staging/b.jpg", "survey")
+    mock_state_manager.add_image("a.jpg", "/tmp/staging/a.jpg", "survey-key-1", "survey")
+    mock_state_manager.add_image("b.jpg", "/tmp/staging/b.jpg", "survey-key-1", "survey")
 
     paths = mock_state_manager.get_all_staging_paths()
     assert isinstance(paths, set)
     assert "/tmp/staging/a.jpg" in paths
     assert "/tmp/staging/b.jpg" in paths
     assert "/tmp/staging/unknown.jpg" not in paths
+
+
+def test_get_staged_images_includes_upload_key(mock_state_manager):
+    """Staged image rows include the upload_key selected at staging time."""
+    mock_state_manager.add_image("with-key.jpg", "/tmp/with-key.jpg", "survey-key-xyz", "survey")
+    images = mock_state_manager.get_staged_images()
+    row = next(i for i in images if i["filename"] == "with-key.jpg")
+    assert row["upload_key"] == "survey-key-xyz"
+
+
+def test_init_db_migrates_upload_key_column_for_legacy_db(tmp_path, monkeypatch):
+    """_init_db adds upload_key column when opening an older images schema."""
+    db_path = tmp_path / "legacy_state.db"
+
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL,
+            staging_path TEXT NOT NULL,
+            image_type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            exif_timestamp TEXT,
+            file_size INTEGER,
+            retry_count INTEGER DEFAULT 0,
+            add_timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+            upload_timestamp TEXT,
+            error_message TEXT,
+            UNIQUE(staging_path)
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    original_init = StateManager.__init__
+
+    def mock_init(self):
+        if not hasattr(self, "initialized"):
+            self.db_path = db_path
+            self.conn_lock = __import__("threading").Lock()
+            self._init_db()
+            self.initialized = True
+
+    monkeypatch.setattr(StateManager, "__init__", mock_init)
+    StateManager._instance = None
+    manager = StateManager()
+    assert manager is not None
+
+    conn = sqlite3.connect(db_path)
+    cols = conn.execute("PRAGMA table_info(images)").fetchall()
+    conn.close()
+    col_names = {row[1] for row in cols}
+    assert "upload_key" in col_names
+
+    monkeypatch.setattr(StateManager, "__init__", original_init)
+    StateManager._instance = None

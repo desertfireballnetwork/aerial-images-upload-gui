@@ -68,6 +68,7 @@ class StateManager:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     filename TEXT NOT NULL,
                     staging_path TEXT NOT NULL,
+                    upload_key TEXT,
                     image_type TEXT NOT NULL CHECK(image_type IN ('survey', 'training_true', 'training_false')),
                     status TEXT NOT NULL CHECK(status IN ('pending', 'staging', 'staged', 'uploading', 'uploaded', 'failed')),
                     exif_timestamp TEXT,
@@ -127,10 +128,17 @@ class StateManager:
                 "CREATE INDEX IF NOT EXISTS idx_upload_stats_timestamp ON upload_stats(timestamp)"
             )
 
+            # Backward-compatible migration for databases created before upload_key existed.
+            cols = conn.execute("PRAGMA table_info(images)").fetchall()
+            col_names = {row[1] for row in cols}
+            if "upload_key" not in col_names:
+                conn.execute("ALTER TABLE images ADD COLUMN upload_key TEXT")
+
     def add_image(
         self,
         filename: str,
         staging_path: str,
+        upload_key: str,
         image_type: str,
         exif_timestamp: Optional[str] = None,
         file_size: Optional[int] = None,
@@ -139,10 +147,18 @@ class StateManager:
         with self.transaction() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO images (filename, staging_path, image_type, status, exif_timestamp, file_size)
-                VALUES (?, ?, ?, 'staged', ?, ?)
+                INSERT INTO images (
+                    filename,
+                    staging_path,
+                    upload_key,
+                    image_type,
+                    status,
+                    exif_timestamp,
+                    file_size
+                )
+                VALUES (?, ?, ?, ?, 'staged', ?, ?)
                 """,
-                (filename, staging_path, image_type, exif_timestamp, file_size),
+                (filename, staging_path, upload_key, image_type, exif_timestamp, file_size),
             )
             return cursor.lastrowid
 
@@ -185,7 +201,15 @@ class StateManager:
         with self.transaction() as conn:
             cursor = conn.execute(
                 """
-                SELECT id, filename, staging_path, image_type, exif_timestamp, file_size, retry_count
+                SELECT
+                    id,
+                    filename,
+                    staging_path,
+                    upload_key,
+                    image_type,
+                    exif_timestamp,
+                    file_size,
+                    retry_count
                 FROM images
                 WHERE status = 'staged'
                 ORDER BY exif_timestamp ASC NULLS LAST, add_timestamp ASC

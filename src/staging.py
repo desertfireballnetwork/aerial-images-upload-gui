@@ -299,11 +299,13 @@ class FolderScanner(QThread):
         self,
         staging_dir: Path,
         image_type: str,
+        upload_key: str,
         state_manager,
     ):
         super().__init__()
         self.staging_dir = Path(staging_dir)
         self.image_type = image_type
+        self.upload_key = upload_key
         self.state_manager = state_manager
         self._should_stop = False
 
@@ -366,6 +368,7 @@ class FolderScanner(QThread):
                     self.state_manager.add_image(
                         filename=img_path.name,
                         staging_path=staging_path_str,
+                        upload_key=self.upload_key,
                         image_type=self.image_type,
                         exif_timestamp=exif_timestamp,
                         file_size=file_size,

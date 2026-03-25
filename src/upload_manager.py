@@ -150,6 +150,17 @@ class UploadManager(QThread):
         file_path = Path(image_data["staging_path"])
         filename = image_data["filename"]
         image_type = image_data["image_type"]
+        image_upload_key = (image_data.get("upload_key") or "").strip()
+
+        if not image_upload_key:
+            error_msg = (
+                "Missing upload key on staged image; please re-stage this image from Step 3 "
+                "with the correct survey key."
+            )
+            self.state_manager.increment_retry_count(image_id)
+            self.state_manager.update_image_status(image_id, "failed", error_msg)
+            self.upload_failed.emit(filename, error_msg)
+            return False
 
         # Update status to uploading
         self.state_manager.update_image_status(image_id, "uploading")
@@ -157,7 +168,7 @@ class UploadManager(QThread):
 
         # Check if already uploaded
         try:
-            already_uploaded = await client.check_image_uploaded(self.upload_key, filename)
+            already_uploaded = await client.check_image_uploaded(image_upload_key, filename)
             if already_uploaded:
                 logger.info(f"{filename} already uploaded, marking as complete")
                 self.state_manager.update_image_status(image_id, "uploaded")
@@ -179,7 +190,9 @@ class UploadManager(QThread):
         for attempt in range(self.MAX_RETRIES):
             try:
                 # Upload the image
-                success, message = await client.upload_image(self.upload_key, image_type, file_path)
+                success, message = await client.upload_image(
+                    image_upload_key, image_type, file_path
+                )
 
                 if success:
                     # Record success
