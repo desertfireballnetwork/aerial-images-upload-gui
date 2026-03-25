@@ -179,7 +179,7 @@ class _UnstagedCounter(QThread):
         self.result_ready.emit(text)
 
 
-def _build_stylesheet(p: dict) -> str:
+def _build_stylesheet(p: dict, check_svg: str = "") -> str:
     """Build a full QSS string from a palette dict *p*."""
     return f"""
     /* ---- Global ---- */
@@ -314,6 +314,33 @@ def _build_stylesheet(p: dict) -> str:
         border: 5px solid {p['primary']};
         border-radius: 9px; /* Force circular shape (half of 16px + borders) */
         image: none;
+    }}
+
+    /* ---- Checkboxes ---- */
+    QCheckBox {{
+        color: {p['text']};
+        font-size: 10pt;
+        spacing: 6px;
+        outline: none;
+    }}
+    QCheckBox:focus {{
+        border: none;
+        outline: none;
+    }}
+    QCheckBox::indicator {{
+        width: 16px;
+        height: 16px;
+        border-radius: 3px;
+        border: 2px solid {p['border']};
+        background-color: {p['input_bg']};
+    }}
+    QCheckBox::indicator:hover {{
+        border-color: {p['primary']};
+    }}
+    QCheckBox::indicator:checked {{
+        background-color: {p['primary']};
+        border: 2px solid {p['primary']};
+        image: url({check_svg});
     }}
 
     /* ---- Buttons (default / secondary) ---- */
@@ -532,8 +559,9 @@ def _build_stylesheet(p: dict) -> str:
     """
 
 
-DARK_STYLESHEET = _build_stylesheet(_DARK)
-LIGHT_STYLESHEET = _build_stylesheet(_LIGHT)
+_CHECK_SVG = str(Path(__file__).parent / "assets" / "check.svg")
+DARK_STYLESHEET = _build_stylesheet(_DARK, _CHECK_SVG)
+LIGHT_STYLESHEET = _build_stylesheet(_LIGHT, _CHECK_SVG)
 
 
 def apply_stylesheet(app_or_widget, dark: bool = True):
