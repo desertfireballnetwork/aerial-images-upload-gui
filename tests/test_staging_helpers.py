@@ -396,7 +396,7 @@ class TestFolderScanner:
             img = Image.new("RGB", (10, 10), color="red")
             img.save(staging / f"IMG_{i:04d}.jpg", "JPEG")
 
-        scanner = FolderScanner(staging, "survey", mock_state_manager)
+        scanner = FolderScanner(staging, "survey", "survey-key-test", mock_state_manager)
         # Run synchronously (not as a thread)
         scanner.run()
 
@@ -416,6 +416,7 @@ class TestFolderScanner:
         mock_state_manager.add_image(
             filename="IMG_0000.jpg",
             staging_path=str(img_path),
+            upload_key="survey-key-test",
             image_type="survey",
             file_size=img_path.stat().st_size,
         )
@@ -424,7 +425,7 @@ class TestFolderScanner:
         img2 = Image.new("RGB", (10, 10), color="green")
         img2.save(staging / "IMG_0001.jpg", "JPEG")
 
-        scanner = FolderScanner(staging, "survey", mock_state_manager)
+        scanner = FolderScanner(staging, "survey", "survey-key-test", mock_state_manager)
         scanner.run()
 
         # Should have 2 total (1 pre-registered + 1 newly registered)
@@ -436,7 +437,7 @@ class TestFolderScanner:
         staging = tmp_path / "staging"
         staging.mkdir()
 
-        scanner = FolderScanner(staging, "survey", mock_state_manager)
+        scanner = FolderScanner(staging, "survey", "survey-key-test", mock_state_manager)
         scanner.run()
 
         counts = mock_state_manager.get_image_counts()
@@ -449,7 +450,7 @@ class TestFolderScanner:
         img = Image.new("RGB", (10, 10), color="red")
         img.save(staging / "IMG_0000.jpg", "JPEG")
 
-        scanner = FolderScanner(staging, "training_true", mock_state_manager)
+        scanner = FolderScanner(staging, "training_true", "survey-key-test", mock_state_manager)
         scanner.run()
 
         images = mock_state_manager.get_staged_images()
@@ -463,7 +464,7 @@ class TestFolderScanner:
         img = Image.new("RGB", (10, 10), color="red")
         img.save(staging / "IMG_0000.jpg", "JPEG")
 
-        scanner = FolderScanner(staging, "survey", mock_state_manager)
+        scanner = FolderScanner(staging, "survey", "survey-key-test", mock_state_manager)
 
         # force registration to fail
         def blow_up(*args, **kwargs):
@@ -489,7 +490,7 @@ class TestFolderScanner:
         img.save(staging / "UPPER.JPG", "JPEG")
         img.save(staging / "MIXED.JpG", "JPEG")
 
-        scanner = FolderScanner(staging, "survey", mock_state_manager)
+        scanner = FolderScanner(staging, "survey", "survey-key-test", mock_state_manager)
 
         mock_finished = MagicMock()
         scanner.finished.connect(mock_finished)

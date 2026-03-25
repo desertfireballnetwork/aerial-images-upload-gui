@@ -239,7 +239,7 @@ class TestFolderScannerIntegration:
         assert len(copied) == 3
 
         # Step 2: Scan and register
-        scanner = FolderScanner(staging, "survey", integration_state_manager)
+        scanner = FolderScanner(staging, "survey", "survey-key-test", integration_state_manager)
         scanner.start()
         wait_for_thread_done(qtbot, lambda: scanner, timeout=10_000)
 
@@ -257,13 +257,14 @@ class TestFolderScannerIntegration:
         integration_state_manager.add_image(
             filename="IMG_0000.jpg",
             staging_path=str(img_path),
+            upload_key="survey-key-test",
             image_type="survey",
         )
 
         # Create another un-registered
         create_test_jpeg(staging / "IMG_0001.jpg")
 
-        scanner = FolderScanner(staging, "survey", integration_state_manager)
+        scanner = FolderScanner(staging, "survey", "survey-key-test", integration_state_manager)
         scanner.start()
         wait_for_thread_done(qtbot, lambda: scanner, timeout=10_000)
 
