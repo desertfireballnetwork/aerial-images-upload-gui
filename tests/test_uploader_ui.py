@@ -238,6 +238,24 @@ class TestAdvancedPanel:
         assert not ui_window.advanced_group.isVisible()
         assert "Show" in ui_window.advanced_toggle_btn.text()
 
+    def test_delete_staging_checkbox_exists_unchecked(self, ui_window):
+        """Advanced Settings has delete-staging checkbox, default unchecked."""
+        assert hasattr(ui_window, "delete_staging_checkbox")
+        assert ui_window.delete_staging_checkbox.isChecked() is False
+        assert ui_window.delete_staging_checkbox.parent() is ui_window.advanced_group
+
+    def test_delete_staging_checkbox_persists_to_config(self, ui_window):
+        """Toggling delete-staging checkbox writes delete_staging_after_upload."""
+        ui_window.delete_staging_checkbox.setChecked(True)
+        with open(ui_window.config_file) as f:
+            data = json.load(f)
+        assert data.get("delete_staging_after_upload") is True
+
+        ui_window.delete_staging_checkbox.setChecked(False)
+        with open(ui_window.config_file) as f:
+            data = json.load(f)
+        assert data.get("delete_staging_after_upload") is False
+
 
 # ---------------------------------------------------------------------------
 # Staging speed label tests

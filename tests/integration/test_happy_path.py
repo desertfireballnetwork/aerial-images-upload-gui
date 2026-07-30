@@ -9,7 +9,8 @@ Exercises the full user flow:
 5. User clicks "Start Upload"
 6. All images pass the check_uploaded pre-flight (not yet uploaded)
 7. All images upload successfully
-8. DB shows all images as "uploaded", staging files are deleted
+8. DB shows all images as "uploaded"; staging files are kept by default
+   (opt-in Advanced Setting deletes them when checked)
 """
 
 import pytest
@@ -134,6 +135,40 @@ class TestHappyPathUpload:
         """All staged images upload successfully."""
         window = app_window
         n = len(pre_staged_images)
+
+        with aioresponses() as m:
+            for _ in range(n):
+                m.post(CHECK_URL, status=200, body="0")
+                m.post(UPLOAD_URL, status=200, body="SUCCESS")
+
+            qtbot.mouseClick(window.upload_start_btn, Qt.MouseButton.LeftButton)
+            assert window.upload_thread is not None
+
+            wait_for_thread_done(qtbot, lambda: window.upload_thread, timeout=30_000)
+            process_events()
+
+        counts = integration_state_manager.get_image_counts()
+        assert counts["uploaded"] == n
+        assert counts["staged"] == 0
+        assert counts["failed"] == 0
+
+        # Default: keep staging files after successful upload
+        remaining = list(staging_dir.glob("*.jpg"))
+        assert len(remaining) == n
+
+    def test_upload_deletes_staging_when_opt_in(
+        self,
+        qtbot,
+        app_window,
+        upload_key,
+        integration_state_manager,
+        staging_dir,
+        pre_staged_images,
+    ):
+        """When Advanced Setting is checked, staging files are deleted after upload."""
+        window = app_window
+        n = len(pre_staged_images)
+        window.delete_staging_checkbox.setChecked(True)
 
         with aioresponses() as m:
             for _ in range(n):
