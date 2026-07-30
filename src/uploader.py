@@ -837,16 +837,13 @@ class UploaderWindow(QMainWindow):
         type_layout = QHBoxLayout()
         type_layout.addWidget(QLabel("Image Type:"))
         self.image_type_combo = QComboBox()
-        self.image_type_combo.addItems(
-            [
-                "survey",
-                "training_true",
-                "training_false",
-            ]
-        )
+        self.image_type_combo.addItem("(Select image type)", None)
+        for image_type in ("survey", "training_true", "training_false"):
+            self.image_type_combo.addItem(image_type, image_type)
+        self.image_type_combo.setCurrentIndex(0)
         self.image_type_combo.setToolTip("Choose what kind of flight these images are from.")
         type_layout.addWidget(self.image_type_combo)
-        self.image_type_desc = QLabel("Survey flight images")
+        self.image_type_desc = QLabel("Choose the kind of flight these images are from")
         self.image_type_desc.setObjectName("help_text")
         type_layout.addWidget(self.image_type_desc)
         type_layout.addStretch()
@@ -860,7 +857,9 @@ class UploaderWindow(QMainWindow):
         self.stage_btn.setToolTip(
             "Scans your Local Storage Folder and registers un-staged images for upload."
         )
+        self.stage_btn.setEnabled(False)
         layout.addWidget(self.stage_btn)
+        self.image_type_combo.currentIndexChanged.connect(self._on_image_type_index_changed)
 
         # Progress
         self.scan_progress = QProgressBar()
@@ -1150,11 +1149,28 @@ class UploaderWindow(QMainWindow):
     def _update_image_type_desc(self, text: str):
         """Update the descriptive label next to the image type combo."""
         descs = {
+            "(Select image type)": "Choose the kind of flight these images are from",
             "survey": "Survey flight images",
             "training_true": "Training: confirmed meteorite",
             "training_false": "Training: no meteorite",
         }
         self.image_type_desc.setText(descs.get(text, ""))
+
+    def _sync_stage_button_enabled(self):
+        """Enable Stage only when a real type is selected and no folder scan is running."""
+        has_type = self.image_type_combo.currentData() is not None
+        scanning = self.scan_thread is not None and self.scan_thread.isRunning()
+        self.stage_btn.setEnabled(has_type and not scanning)
+
+    def _on_image_type_index_changed(self, _index: int):
+        """Re-evaluate Stage enablement when the image type combo changes."""
+        self._sync_stage_button_enabled()
+
+    def _reset_image_type_selection(self):
+        """Reset image type to placeholder and disable Stage (after SD copy)."""
+        self.image_type_combo.setCurrentIndex(0)
+        self._update_image_type_desc(self.image_type_combo.currentText())
+        self.stage_btn.setEnabled(False)
 
     # ------------------------------------------------------------------
     # Config persistence
@@ -1352,6 +1368,7 @@ class UploaderWindow(QMainWindow):
 
         self.set_banner_state("DONE_COPYING")
         self.update_unstaged_count()
+        self._reset_image_type_selection()
 
         # Eject SD card if requested (runs in background thread)
         if self.eject_sd_checkbox.isChecked() and hasattr(self, "_last_sd_card_path"):
@@ -1410,7 +1427,15 @@ class UploaderWindow(QMainWindow):
             )
             return
 
-        image_type = self.image_type_combo.currentText()
+        image_type = self.image_type_combo.currentData()
+        if image_type is None:
+            QMessageBox.warning(
+                self,
+                "Image Type Required",
+                "Please select an image type before staging images.",
+            )
+            return
+
         upload_key = self.upload_key_edit.text().strip()
         if not upload_key:
             QMessageBox.warning(
@@ -1440,7 +1465,7 @@ class UploaderWindow(QMainWindow):
 
     def on_scan_finished(self, registered, skipped, failed):
         """Handle folder scan completion."""
-        self.stage_btn.setEnabled(True)
+        self._sync_stage_button_enabled()
         self.refresh_unstaged_btn.setEnabled(True)
         self.scan_progress.setValue(0)
         self.scan_status_label.setText("")

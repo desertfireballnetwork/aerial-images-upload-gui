@@ -31,6 +31,7 @@ class TestMixedSurveyStaging:
 
         # Stage batch A
         window.upload_key_edit.setText("survey-key-A")
+        window.image_type_combo.setCurrentText("survey")
         qtbot.mouseClick(window.stage_btn, Qt.MouseButton.LeftButton)
         wait_for_thread_done(qtbot, lambda: window.scan_thread, timeout=15_000)
         process_events()
@@ -39,6 +40,7 @@ class TestMixedSurveyStaging:
         create_test_jpeg(staging_dir / "B_0001.jpg", exif_datetime="2025:06:15 10:33:00")
         create_test_jpeg(staging_dir / "B_0002.jpg", exif_datetime="2025:06:15 10:34:00")
         window.upload_key_edit.setText("survey-key-B")
+        window.image_type_combo.setCurrentText("survey")
         qtbot.mouseClick(window.stage_btn, Qt.MouseButton.LeftButton)
         wait_for_thread_done(qtbot, lambda: window.scan_thread, timeout=15_000)
         process_events()
