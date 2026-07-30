@@ -359,3 +359,86 @@ class TestWizardLayout:
         ui_window._on_eject_done(False, "Device is busy")
         mock_warning.assert_called_once()
         assert "Device is busy" in mock_warning.call_args[0][2]
+
+
+# ---------------------------------------------------------------------------
+# Image type placeholder / Stage gate (Issue #4)
+# ---------------------------------------------------------------------------
+
+
+class TestImageTypeDefault:
+    """Placeholder image type gates Stage and resets after SD copy."""
+
+    def test_startup_placeholder_disables_stage(self, ui_window):
+        """On construction, combo is at placeholder and Stage is disabled."""
+        assert ui_window.image_type_combo.currentData() is None
+        assert ui_window.image_type_combo.currentIndex() == 0
+        assert ui_window.stage_btn.isEnabled() is False
+
+    def test_selecting_real_type_enables_stage(self, ui_window):
+        """Selecting a real image type enables Stage and sets currentData()."""
+        ui_window.image_type_combo.setCurrentText("survey")
+        assert ui_window.image_type_combo.currentData() == "survey"
+        assert ui_window.stage_btn.isEnabled() is True
+
+    def test_start_folder_scan_guard_with_placeholder(self, ui_window, monkeypatch):
+        """With placeholder selected, start_folder_scan warns and does not scan."""
+        assert ui_window.image_type_combo.currentData() is None
+
+        mock_warning = MagicMock(return_value=QMessageBox.StandardButton.Ok)
+        monkeypatch.setattr("src.uploader.QMessageBox.warning", mock_warning)
+
+        mock_scanner = MagicMock()
+        monkeypatch.setattr("src.uploader.FolderScanner", mock_scanner)
+
+        ui_window.start_folder_scan()
+
+        mock_warning.assert_called_once()
+        assert mock_warning.call_args[0][1] == "Image Type Required"
+        mock_scanner.assert_not_called()
+        assert ui_window.scan_thread is None
+
+    def test_on_staging_finished_resets_image_type(self, ui_window):
+        """After a successful SD copy, combo resets to placeholder and Stage disables."""
+        ui_window.image_type_combo.setCurrentText("survey")
+        assert ui_window.stage_btn.isEnabled() is True
+
+        ui_window.on_staging_finished(10, 0, 0, False)
+
+        assert ui_window.image_type_combo.currentData() is None
+        assert ui_window.image_type_combo.currentIndex() == 0
+        assert ui_window.stage_btn.isEnabled() is False
+
+    def test_on_staging_finished_aborted_also_resets(self, ui_window):
+        """Aborted SD copy also resets image type to placeholder."""
+        ui_window.image_type_combo.setCurrentText("training_true")
+        assert ui_window.stage_btn.isEnabled() is True
+
+        ui_window.on_staging_finished(3, 0, 1, True)
+
+        assert ui_window.image_type_combo.currentData() is None
+        assert ui_window.image_type_combo.currentIndex() == 0
+        assert ui_window.stage_btn.isEnabled() is False
+
+    def test_combo_change_during_scan_keeps_stage_disabled(self, ui_window, monkeypatch):
+        """Changing image type mid-scan must not re-enable Stage."""
+        ui_window.image_type_combo.setCurrentText("survey")
+        assert ui_window.stage_btn.isEnabled() is True
+
+        mock_thread = MagicMock()
+        mock_thread.isRunning.return_value = True
+        ui_window.scan_thread = mock_thread
+        ui_window.stage_btn.setEnabled(False)
+
+        ui_window.image_type_combo.setCurrentText("training_true")
+
+        assert ui_window.image_type_combo.currentData() == "training_true"
+        assert ui_window.stage_btn.isEnabled() is False
+
+        mock_thread.isRunning.return_value = False
+        monkeypatch.setattr(
+            "src.uploader.QMessageBox.information",
+            MagicMock(return_value=QMessageBox.StandardButton.Ok),
+        )
+        ui_window.on_scan_finished(1, 0, 0)
+        assert ui_window.stage_btn.isEnabled() is True
