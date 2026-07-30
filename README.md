@@ -14,7 +14,7 @@ Cross-platform GUI application for staging drone survey images from SD cards and
 
 ## Requirements
 
-- Python 3.10 or higher
+- Python 3.10, 3.11, or 3.12 (3.13 is currently blocked by the PySide6 dependency)
 - PySide6 for GUI
 - Internet connection for uploads
 

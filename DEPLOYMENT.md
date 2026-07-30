@@ -5,7 +5,7 @@ This guide covers building platform-specific packages for the DFN Image Uploader
 ## Prerequisites
 
 ### All Platforms
-- Python 3.10 or higher
+- Python 3.10, 3.11, or 3.12 (3.13 is currently blocked by the PySide6 dependency)
 - Poetry for dependency management
 
 ### Platform-Specific
@@ -44,11 +44,22 @@ poetry add --group dev pyinstaller
 poetry run pyinstaller --name="DFN-Uploader" \
     --windowed \
     --onefile \
+    --collect-all PySide6 \
     --icon=icon.ico \
-    --add-data="icon.ico:." \
+    --add-data="icon.ico;." \
     src/main.py
 
 # Output will be in dist/DFN-Uploader.exe
+
+# Debug build — opens a console window on launch so runtime errors are visible
+poetry run pyinstaller --name="DFN-Uploader-debug" \
+    --onefile \
+    --collect-all PySide6 \
+    --icon=icon.ico \
+    --add-data="icon.ico;." \
+    src/main.py
+
+# Output will be in dist/DFN-Uploader-debug.exe
 ```
 
 ### macOS Application Bundle
@@ -120,7 +131,10 @@ appimagetool AppDir DFN-Uploader.AppImage
 ### Windows
 ```cmd
 dist\DFN-Uploader.exe
+dist\DFN-Uploader-debug.exe
 ```
+
+On Windows, file logs are written to `%APPDATA%\DFN\uploader.log` (not next to the executable).
 
 ### macOS
 ```bash
@@ -185,6 +199,7 @@ pyinstaller ... --exclude-module matplotlib --exclude-module numpy
 - Windows: Use `.ico` format (256x256 or multiple sizes)
 - macOS: Use `.icns` format (1024x1024 recommended)
 - Linux: Use `.png` format (256x256 or 512x512)
+- App icons (`icon.ico`, `icon.icns`, `icon.png`) are derived from the fireball mark in the webapp navbar SVG (`dfn-meteorite-drone-webapp/webapp/src/static/images/dfn_drone_logo_white.svg` — use only the orange path and grey circle). Regenerate with `rsvg-convert`, then ImageMagick `-trim` to crop to content bounds, then square to `max(w,h)`. Do not use ImageMagick to render the SVG directly (it clips the path).
 
 ### Runtime Errors
 Enable debug mode:
