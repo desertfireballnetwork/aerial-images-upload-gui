@@ -199,7 +199,7 @@ pyinstaller ... --exclude-module matplotlib --exclude-module numpy
 - Windows: Use `.ico` format (256x256 or multiple sizes)
 - macOS: Use `.icns` format (1024x1024 recommended)
 - Linux: Use `.png` format (256x256 or 512x512)
-- App icons are generated from the DFN fireball mark in `src/assets/dfn_fireball.svg` (extracted from the webapp navbar logo)
+- App icons are generated from `src/assets/dfn_fireball.svg` (fireball extracted from the webapp navbar logo). Use `rsvg-convert` to render, then ImageMagick `-trim` to crop to content bounds, then square to `max(w,h)` before building `.ico`/`.icns`/`.png`. Do not use ImageMagick to render the SVG directly (it clips the path).
 
 ### Runtime Errors
 Enable debug mode:
