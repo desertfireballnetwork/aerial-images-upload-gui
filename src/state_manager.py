@@ -10,6 +10,8 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from contextlib import contextmanager
 
+VALID_IMAGE_TYPES = frozenset({"survey", "training_true", "training_false", "orthomosaic"})
+
 
 class StateManager:
     """Singleton class for managing application state with thread-safe SQLite access."""
@@ -69,7 +71,7 @@ class StateManager:
                     filename TEXT NOT NULL,
                     staging_path TEXT NOT NULL,
                     upload_key TEXT,
-                    image_type TEXT NOT NULL CHECK(image_type IN ('survey', 'training_true', 'training_false')),
+                    image_type TEXT NOT NULL,
                     status TEXT NOT NULL CHECK(status IN ('pending', 'staging', 'staged', 'uploading', 'uploaded', 'failed')),
                     exif_timestamp TEXT,
                     file_size INTEGER,
@@ -134,6 +136,43 @@ class StateManager:
             if "upload_key" not in col_names:
                 conn.execute("ALTER TABLE images ADD COLUMN upload_key TEXT")
 
+            self._migrate_image_type_check_constraint(conn)
+
+    def _migrate_image_type_check_constraint(self, conn: sqlite3.Connection) -> None:
+        """Drop legacy image_type CHECK so new types (e.g. orthomosaic) can be stored."""
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='images'"
+        ).fetchone()
+        if not row or "CHECK(image_type IN" not in row["sql"]:
+            return
+
+        conn.executescript(
+            """
+            BEGIN;
+            CREATE TABLE images_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                staging_path TEXT NOT NULL,
+                upload_key TEXT,
+                image_type TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('pending', 'staging', 'staged', 'uploading', 'uploaded', 'failed')),
+                exif_timestamp TEXT,
+                file_size INTEGER,
+                retry_count INTEGER DEFAULT 0,
+                add_timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+                upload_timestamp TEXT,
+                error_message TEXT,
+                UNIQUE(staging_path)
+            );
+            INSERT INTO images_new SELECT * FROM images;
+            DROP TABLE images;
+            ALTER TABLE images_new RENAME TO images;
+            CREATE INDEX IF NOT EXISTS idx_images_status ON images(status);
+            CREATE INDEX IF NOT EXISTS idx_images_exif_timestamp ON images(exif_timestamp);
+            COMMIT;
+            """
+        )
+
     def add_image(
         self,
         filename: str,
@@ -144,6 +183,9 @@ class StateManager:
         file_size: Optional[int] = None,
     ) -> int:
         """Add a new image to the database."""
+        if image_type not in VALID_IMAGE_TYPES:
+            raise ValueError(f"Invalid image_type: {image_type!r}")
+
         with self.transaction() as conn:
             cursor = conn.execute(
                 """

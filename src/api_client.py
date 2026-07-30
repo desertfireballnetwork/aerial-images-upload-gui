@@ -68,7 +68,7 @@ class APIClient:
 
         Args:
             upload_key: Survey upload key (UUID)
-            image_type: One of 'survey', 'training_true', 'training_false'
+            image_type: One of 'survey', 'training_true', 'training_false', 'orthomosaic'
             file_path: Path to the image file
 
         Returns:

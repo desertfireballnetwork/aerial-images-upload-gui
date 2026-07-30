@@ -518,3 +518,19 @@ class TestImageTypeDefault:
         )
         ui_window.on_scan_finished(1, 0, 0)
         assert ui_window.stage_btn.isEnabled() is True
+
+
+class TestOrthomosaicImageType:
+    """Orthomosaic image type option (Issue #13)."""
+
+    def test_combo_includes_orthomosaic(self, ui_window):
+        """Image type combo lists orthomosaic alongside the three existing types."""
+        combo = ui_window.image_type_combo
+        types = [combo.itemData(i) for i in range(combo.count()) if combo.itemData(i) is not None]
+        assert types == ["survey", "training_true", "training_false", "orthomosaic"]
+
+    def test_orthomosaic_description(self, ui_window):
+        """Selecting orthomosaic shows the low-res orthomosaic helper text."""
+        ui_window.image_type_combo.setCurrentText("orthomosaic")
+        assert ui_window.image_type_combo.currentData() == "orthomosaic"
+        assert ui_window.image_type_desc.text() == "Low-res images for orthomosaic processing"

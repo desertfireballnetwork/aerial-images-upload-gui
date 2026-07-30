@@ -847,7 +847,7 @@ class UploaderWindow(QMainWindow):
         type_layout.addWidget(QLabel("Image Type:"))
         self.image_type_combo = QComboBox()
         self.image_type_combo.addItem("(Select image type)", None)
-        for image_type in ("survey", "training_true", "training_false"):
+        for image_type in ("survey", "training_true", "training_false", "orthomosaic"):
             self.image_type_combo.addItem(image_type, image_type)
         self.image_type_combo.setCurrentIndex(0)
         self.image_type_combo.setToolTip("Choose what kind of flight these images are from.")
@@ -1173,6 +1173,7 @@ class UploaderWindow(QMainWindow):
             "survey": "Survey flight images",
             "training_true": "Training: confirmed meteorite",
             "training_false": "Training: no meteorite",
+            "orthomosaic": "Low-res images for orthomosaic processing",
         }
         self.image_type_desc.setText(descs.get(text, ""))
 
