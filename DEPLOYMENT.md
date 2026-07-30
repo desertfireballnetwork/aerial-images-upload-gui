@@ -199,6 +199,7 @@ pyinstaller ... --exclude-module matplotlib --exclude-module numpy
 - Windows: Use `.ico` format (256x256 or multiple sizes)
 - macOS: Use `.icns` format (1024x1024 recommended)
 - Linux: Use `.png` format (256x256 or 512x512)
+- App icons are generated from the DFN fireball mark in `src/assets/dfn_fireball.svg` (extracted from the webapp navbar logo)
 
 ### Runtime Errors
 Enable debug mode:
