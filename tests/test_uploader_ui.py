@@ -11,6 +11,7 @@ Covers:
 """
 
 import json
+import sys
 import threading
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -69,18 +70,15 @@ def _make_patched_init(config_path: Path, staging_dir: Path):
     return patched_init
 
 
-@pytest.fixture(autouse=True)
-def reset_singleton():
-    """Reset StateManager singleton between tests."""
-    StateManager._instance = None
-    yield
-    StateManager._instance = None
+def _build_ui_window(qtbot, tmp_path, monkeypatch, platform=None):
+    """Construct a patched UploaderWindow, optionally with sys.platform mocked first.
 
+    Platform must be set before construction because eject_sd_checkbox is created
+    during setup_ui() in __init__.
+    """
+    if platform is not None:
+        monkeypatch.setattr(sys, "platform", platform)
 
-@pytest.fixture
-def ui_window(qtbot, tmp_path, monkeypatch):
-    """Provide a fully patched UploaderWindow for UI-only testing."""
-    # Temp config
     config_path = tmp_path / "config.json"
     config_data = {
         "upload_key": "test-key",
@@ -89,10 +87,9 @@ def ui_window(qtbot, tmp_path, monkeypatch):
         "concurrency_value": 3,
         "dark_mode": True,
     }
-    (tmp_path / "staging").mkdir()
+    (tmp_path / "staging").mkdir(exist_ok=True)
     config_path.write_text(json.dumps(config_data))
 
-    # Temp state DB
     db_path = tmp_path / "test_state.db"
 
     def _mock_sm_init(self):
@@ -104,7 +101,6 @@ def ui_window(qtbot, tmp_path, monkeypatch):
 
     monkeypatch.setattr(StateManager, "__init__", _mock_sm_init)
 
-    # Patch SD monitor
     from src import sd_monitor as sd_mod
 
     monkeypatch.setattr(sd_mod.SDMonitor, "_get_removable_devices", lambda self: [])
@@ -115,7 +111,6 @@ def ui_window(qtbot, tmp_path, monkeypatch):
         lambda self: {"added": [], "removed": []},
     )
 
-    # Suppress dialogs
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **kw: QMessageBox.StandardButton.Yes)
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **kw: QMessageBox.StandardButton.Ok)
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **kw: QMessageBox.StandardButton.Ok)
@@ -130,9 +125,22 @@ def ui_window(qtbot, tmp_path, monkeypatch):
     window = UploaderWindow()
     qtbot.addWidget(window)
     window.show()
+    return window
 
+
+@pytest.fixture(autouse=True)
+def reset_singleton():
+    """Reset StateManager singleton between tests."""
+    StateManager._instance = None
+    yield
+    StateManager._instance = None
+
+
+@pytest.fixture
+def ui_window(qtbot, tmp_path, monkeypatch):
+    """Provide a fully patched UploaderWindow for UI-only testing (host platform)."""
+    window = _build_ui_window(qtbot, tmp_path, monkeypatch)
     yield window
-
     window.close()
 
 
@@ -307,11 +315,16 @@ class TestWizardLayout:
         assert hasattr(ui_window, "upload_stop_btn")
 
     def test_sd_card_checkboxes_exist(self, ui_window):
-        """Step 2 has the delete and eject checkboxes."""
+        """Step 2 has delete checkbox; eject checkbox is platform-dependent (issue #7)."""
         assert hasattr(ui_window, "delete_source_checkbox")
-        assert hasattr(ui_window, "eject_sd_checkbox")
         assert ui_window.delete_source_checkbox.isChecked() is False
-        assert ui_window.eject_sd_checkbox.isChecked() is False
+        assert hasattr(ui_window, "eject_sd_checkbox")
+        if sys.platform.startswith("linux"):
+            assert ui_window.eject_sd_checkbox is None
+        else:
+            assert ui_window.eject_sd_checkbox is not None
+            assert ui_window.eject_sd_checkbox.text() == "Eject SD card when done"
+            assert ui_window.eject_sd_checkbox.isChecked() is False
 
     def test_scan_thread_attribute_exists(self, ui_window):
         """scan_thread attribute is initialized to None."""
@@ -341,22 +354,67 @@ class TestWizardLayout:
         # Button should be re-enabled
         assert ui_window.refresh_unstaged_btn.isEnabled()
 
-    def test_eject_worker_triggered(self, ui_window, monkeypatch):
-        """Verify the background _EjectWorker is launched when eject is requested."""
-        ui_window.eject_sd_checkbox.setChecked(True)
-        ui_window._last_sd_card_path = "/dev/sdd1"
+    def test_eject_worker_triggered(self, qtbot, tmp_path, monkeypatch):
+        """On non-Linux, checked eject launches background _EjectWorker after copy."""
+        window = _build_ui_window(qtbot, tmp_path, monkeypatch, platform="darwin")
+        try:
+            assert window.eject_sd_checkbox is not None
+            window.eject_sd_checkbox.setChecked(True)
+            window._last_sd_card_path = "/dev/sdd1"
 
-        # Mock the eject worker so we don't actually eject anything
-        from src.uploader import _EjectWorker
+            from src.uploader import _EjectWorker
 
-        mock_start = MagicMock()
-        monkeypatch.setattr(_EjectWorker, "start", mock_start)
+            mock_start = MagicMock()
+            monkeypatch.setattr(_EjectWorker, "start", mock_start)
 
-        ui_window.on_staging_finished(10, 0, 0, False)
+            window.on_staging_finished(10, 0, 0, False)
 
-        assert mock_start.called
-        assert isinstance(ui_window._eject_worker, _EjectWorker)
-        assert ui_window._eject_worker.mount_path == "/dev/sdd1"
+            assert mock_start.called
+            assert isinstance(window._eject_worker, _EjectWorker)
+            assert window._eject_worker.mount_path == "/dev/sdd1"
+        finally:
+            window.close()
+
+    def test_eject_checkbox_absent_on_linux(self, qtbot, tmp_path, monkeypatch):
+        """With platform mocked to linux, eject_sd_checkbox is None (issue #7)."""
+        window = _build_ui_window(qtbot, tmp_path, monkeypatch, platform="linux")
+        try:
+            assert window.eject_sd_checkbox is None
+        finally:
+            window.close()
+
+    def test_eject_worker_not_started_on_linux(self, qtbot, tmp_path, monkeypatch):
+        """Post-copy eject must not start _EjectWorker when checkbox is None (Linux)."""
+        window = _build_ui_window(qtbot, tmp_path, monkeypatch, platform="linux")
+        try:
+            assert window.eject_sd_checkbox is None
+            window._last_sd_card_path = "/media/user/SDCARD"
+
+            from src.uploader import _EjectWorker
+
+            mock_start = MagicMock()
+            monkeypatch.setattr(_EjectWorker, "start", mock_start)
+
+            window.on_staging_finished(10, 0, 0, False)
+
+            assert not mock_start.called
+            assert getattr(window, "_eject_worker", None) is None
+        finally:
+            window.close()
+
+    @pytest.mark.parametrize("platform", ["darwin", "win32"])
+    def test_eject_checkbox_present_non_linux(self, qtbot, tmp_path, monkeypatch, platform):
+        """On darwin/win32, eject checkbox exists with expected label and default off."""
+        # Isolate staging dirs per platform param to avoid mkdir races within tmp_path
+        plat_tmp = tmp_path / platform
+        plat_tmp.mkdir()
+        window = _build_ui_window(qtbot, plat_tmp, monkeypatch, platform=platform)
+        try:
+            assert window.eject_sd_checkbox is not None
+            assert window.eject_sd_checkbox.text() == "Eject SD card when done"
+            assert window.eject_sd_checkbox.isChecked() is False
+        finally:
+            window.close()
 
     def test_on_eject_done_updates_ui(self, ui_window, monkeypatch):
         """Verify _on_eject_done correctly shows success/warning dialogs."""
