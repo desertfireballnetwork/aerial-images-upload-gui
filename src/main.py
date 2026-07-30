@@ -24,6 +24,12 @@ def setup_logging():
         ],
     )
 
+    if sys.platform.startswith("linux"):
+        logging.info(
+            "SD card eject from the GUI is disabled on Linux pending a "
+            "platform-specific fix (issue #7)"
+        )
+
 
 def main():
     """Main entry point."""

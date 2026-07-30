@@ -773,12 +773,16 @@ class UploaderWindow(QMainWindow):
         )
         checkbox_layout.addWidget(self.delete_source_checkbox)
 
-        self.eject_sd_checkbox = QCheckBox("Eject SD card when done")
-        self.eject_sd_checkbox.setChecked(False)
-        self.eject_sd_checkbox.setToolTip(
-            "If checked, the SD card will be safely ejected after copying is complete."
-        )
-        checkbox_layout.addWidget(self.eject_sd_checkbox)
+        # Issue #7: hide eject on Linux until platform-specific unmount is reliable.
+        if not sys.platform.startswith("linux"):
+            self.eject_sd_checkbox = QCheckBox("Eject SD card when done")
+            self.eject_sd_checkbox.setChecked(False)
+            self.eject_sd_checkbox.setToolTip(
+                "If checked, the SD card will be safely ejected after copying is complete."
+            )
+            checkbox_layout.addWidget(self.eject_sd_checkbox)
+        else:
+            self.eject_sd_checkbox = None
         checkbox_layout.addStretch()
         layout.addLayout(checkbox_layout)
 
@@ -1354,7 +1358,11 @@ class UploaderWindow(QMainWindow):
         self.update_unstaged_count()
 
         # Eject SD card if requested (runs in background thread)
-        if self.eject_sd_checkbox.isChecked() and hasattr(self, "_last_sd_card_path"):
+        if (
+            getattr(self, "eject_sd_checkbox", None) is not None
+            and self.eject_sd_checkbox.isChecked()
+            and hasattr(self, "_last_sd_card_path")
+        ):
             self.log("Ejecting SD card…")
             self._eject_worker = _EjectWorker(self._last_sd_card_path)
             self._eject_worker.done.connect(self._on_eject_done)
