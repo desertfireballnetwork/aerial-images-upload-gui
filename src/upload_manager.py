@@ -44,12 +44,14 @@ class UploadManager(QThread):
         state_manager,
         stats_tracker: StatsTracker,
         base_url: str = "https://find.gfo.rocks",
+        delete_staging_after_upload: bool = False,
     ):
         super().__init__()
         self.upload_key = upload_key
         self.state_manager = state_manager
         self.stats_tracker = stats_tracker
         self.base_url = base_url
+        self.delete_staging_after_upload = delete_staging_after_upload
 
         self._should_stop = False
         self._paused = False
@@ -173,8 +175,8 @@ class UploadManager(QThread):
                 logger.info(f"{filename} already uploaded, marking as complete")
                 self.state_manager.update_image_status(image_id, "uploaded")
 
-                # Remove the file
-                if file_path.exists():
+                # Optionally remove the staging file
+                if self.delete_staging_after_upload and file_path.exists():
                     try:
                         file_path.unlink()
                     except Exception as e:
@@ -200,8 +202,8 @@ class UploadManager(QThread):
                     self.stats_tracker.record_upload(file_size)
                     self.state_manager.update_image_status(image_id, "uploaded")
 
-                    # Remove the file
-                    if file_path.exists():
+                    # Optionally remove the staging file
+                    if self.delete_staging_after_upload and file_path.exists():
                         try:
                             file_path.unlink()
                         except Exception as e:

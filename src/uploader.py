@@ -1037,6 +1037,17 @@ class UploaderWindow(QMainWindow):
         concurrency_hint.setObjectName("help_text")
         adv_layout.addWidget(concurrency_hint)
 
+        self.delete_staging_checkbox = QCheckBox("Delete local staging files after upload")
+        self.delete_staging_checkbox.setChecked(
+            bool(self.config.get("delete_staging_after_upload", False))
+        )
+        self.delete_staging_checkbox.setToolTip(
+            "If checked, each file is removed from the local storage folder after a successful "
+            "upload. Off by default so uploaded copies remain on disk for safety."
+        )
+        self.delete_staging_checkbox.toggled.connect(self.save_config)
+        adv_layout.addWidget(self.delete_staging_checkbox)
+
         self.advanced_group.setLayout(adv_layout)
         self.advanced_group.setVisible(False)
         layout.addWidget(self.advanced_group)
@@ -1178,6 +1189,7 @@ class UploaderWindow(QMainWindow):
         self.config["staging_dir"] = self.staging_dir_edit.text()
         self.config["concurrency_mode"] = "auto" if self.auto_radio.isChecked() else "manual"
         self.config["concurrency_value"] = self.worker_spin.value()
+        self.config["delete_staging_after_upload"] = self.delete_staging_checkbox.isChecked()
         self.config["dark_mode"] = self._dark_mode
 
         try:
@@ -1521,7 +1533,11 @@ class UploaderWindow(QMainWindow):
         # Start upload thread
         base_url = self.config.get("base_url", "https://find.gfo.rocks")
         self.upload_thread = UploadManager(
-            upload_key, self.state_manager, self.stats_tracker, base_url=base_url
+            upload_key,
+            self.state_manager,
+            self.stats_tracker,
+            base_url=base_url,
+            delete_staging_after_upload=self.delete_staging_checkbox.isChecked(),
         )
 
         if self.auto_radio.isChecked():

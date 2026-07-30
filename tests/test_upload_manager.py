@@ -260,3 +260,100 @@ async def test_upload_single_image_missing_upload_key_fails_fast(tmp_path, manag
     assert result is False
     assert client.check_image_uploaded.call_count == 0
     assert client.upload_image.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# delete_staging_after_upload
+# ---------------------------------------------------------------------------
+
+
+def _image_data(image_file: Path, image_id: int = 1) -> dict:
+    return {
+        "id": image_id,
+        "filename": image_file.name,
+        "staging_path": str(image_file),
+        "image_type": "survey",
+        "upload_key": "survey-key-row",
+        "file_size": image_file.stat().st_size,
+    }
+
+
+class TestDeleteStagingAfterUpload:
+    def test_default_flag_is_false(self, manager):
+        assert manager.delete_staging_after_upload is False
+
+    @pytest.mark.asyncio
+    async def test_success_keeps_staging_file_by_default(self, tmp_path, manager):
+        image_file = tmp_path / "keep.jpg"
+        image_file.write_bytes(b"abc")
+
+        client = MagicMock()
+        client.check_image_uploaded = AsyncMock(return_value=False)
+        client.upload_image = AsyncMock(return_value=(True, "SUCCESS"))
+
+        result = await manager._upload_single_image(client, _image_data(image_file))
+
+        assert result is True
+        assert image_file.exists()
+
+    @pytest.mark.asyncio
+    async def test_success_deletes_staging_file_when_flag_true(
+        self, tmp_path, mock_state_manager, stats_tracker
+    ):
+        image_file = tmp_path / "delete.jpg"
+        image_file.write_bytes(b"abc")
+
+        m = UploadManager(
+            upload_key="test-key",
+            state_manager=mock_state_manager,
+            stats_tracker=stats_tracker,
+            delete_staging_after_upload=True,
+        )
+
+        client = MagicMock()
+        client.check_image_uploaded = AsyncMock(return_value=False)
+        client.upload_image = AsyncMock(return_value=(True, "SUCCESS"))
+
+        result = await m._upload_single_image(client, _image_data(image_file))
+
+        assert result is True
+        assert not image_file.exists()
+
+    @pytest.mark.asyncio
+    async def test_already_uploaded_keeps_staging_file_by_default(self, tmp_path, manager):
+        image_file = tmp_path / "already.jpg"
+        image_file.write_bytes(b"abc")
+
+        client = MagicMock()
+        client.check_image_uploaded = AsyncMock(return_value=True)
+        client.upload_image = AsyncMock()
+
+        result = await manager._upload_single_image(client, _image_data(image_file))
+
+        assert result is True
+        assert image_file.exists()
+        assert client.upload_image.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_already_uploaded_deletes_staging_file_when_flag_true(
+        self, tmp_path, mock_state_manager, stats_tracker
+    ):
+        image_file = tmp_path / "already-delete.jpg"
+        image_file.write_bytes(b"abc")
+
+        m = UploadManager(
+            upload_key="test-key",
+            state_manager=mock_state_manager,
+            stats_tracker=stats_tracker,
+            delete_staging_after_upload=True,
+        )
+
+        client = MagicMock()
+        client.check_image_uploaded = AsyncMock(return_value=True)
+        client.upload_image = AsyncMock()
+
+        result = await m._upload_single_image(client, _image_data(image_file))
+
+        assert result is True
+        assert not image_file.exists()
+        assert client.upload_image.call_count == 0

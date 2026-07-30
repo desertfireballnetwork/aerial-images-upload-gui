@@ -4,7 +4,7 @@ Integration test: Already-uploaded images — check endpoint returns '1', skip r
 Verifies that when the server says an image already exists:
 - The upload endpoint is never called
 - The image is marked "uploaded" in the DB
-- The local staging file is deleted
+- The local staging file is kept by default (deleted only when opt-in is enabled)
 """
 
 import pytest
@@ -45,6 +45,39 @@ class TestAlreadyUploaded:
                 m.post(CHECK_URL, status=200, body="1")
 
             # Do NOT register UPLOAD_URL — if code hits it, aioresponses raises
+
+            qtbot.mouseClick(window.upload_start_btn, Qt.MouseButton.LeftButton)
+            assert window.upload_thread is not None
+
+            wait_for_thread_done(qtbot, lambda: window.upload_thread, timeout=30_000)
+            process_events()
+
+        counts = integration_state_manager.get_image_counts()
+        assert counts["uploaded"] == n
+        assert counts["staged"] == 0
+        assert counts["failed"] == 0
+
+        # Default: keep staging files when already-uploaded is detected
+        remaining = list(staging_dir.glob("*.jpg"))
+        assert len(remaining) == n
+
+    def test_already_uploaded_deletes_staging_when_opt_in(
+        self,
+        qtbot,
+        app_window,
+        upload_key,
+        integration_state_manager,
+        staging_dir,
+        pre_staged_images,
+    ):
+        """When Advanced Setting is checked, already-uploaded still deletes staging files."""
+        window = app_window
+        n = len(pre_staged_images)
+        window.delete_staging_checkbox.setChecked(True)
+
+        with aioresponses() as m:
+            for _ in range(n):
+                m.post(CHECK_URL, status=200, body="1")
 
             qtbot.mouseClick(window.upload_start_btn, Qt.MouseButton.LeftButton)
             assert window.upload_thread is not None
