@@ -303,3 +303,98 @@ def test_init_db_migrates_upload_key_column_for_legacy_db(tmp_path, monkeypatch)
 
     monkeypatch.setattr(StateManager, "__init__", original_init)
     StateManager._instance = None
+
+
+def test_add_orthomosaic_image(mock_state_manager):
+    """Orthomosaic image type can be persisted on a fresh database."""
+    image_id = mock_state_manager.add_image(
+        filename="ortho.jpg",
+        staging_path="/tmp/ortho.jpg",
+        upload_key="survey-key-1",
+        image_type="orthomosaic",
+    )
+    assert image_id > 0
+
+    images = mock_state_manager.get_staged_images()
+    row = next(i for i in images if i["filename"] == "ortho.jpg")
+    assert row["image_type"] == "orthomosaic"
+
+
+def test_add_image_rejects_invalid_type(mock_state_manager):
+    """add_image rejects image types outside VALID_IMAGE_TYPES."""
+    with pytest.raises(ValueError, match="Invalid image_type"):
+        mock_state_manager.add_image(
+            filename="bad.jpg",
+            staging_path="/tmp/bad.jpg",
+            upload_key="survey-key-1",
+            image_type="not_a_real_type",
+        )
+
+
+def test_init_db_migrates_image_type_check_for_legacy_db(tmp_path, monkeypatch):
+    """_init_db drops legacy image_type CHECK so orthomosaic rows can be stored."""
+    db_path = tmp_path / "legacy_check_state.db"
+
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL,
+            staging_path TEXT NOT NULL,
+            upload_key TEXT,
+            image_type TEXT NOT NULL CHECK(image_type IN ('survey', 'training_true', 'training_false')),
+            status TEXT NOT NULL CHECK(status IN ('pending', 'staging', 'staged', 'uploading', 'uploaded', 'failed')),
+            exif_timestamp TEXT,
+            file_size INTEGER,
+            retry_count INTEGER DEFAULT 0,
+            add_timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+            upload_timestamp TEXT,
+            error_message TEXT,
+            UNIQUE(staging_path)
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO images (filename, staging_path, upload_key, image_type, status)
+        VALUES ('legacy.jpg', '/tmp/legacy.jpg', 'survey-key-1', 'survey', 'staged')
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    original_init = StateManager.__init__
+
+    def mock_init(self):
+        if not hasattr(self, "initialized"):
+            self.db_path = db_path
+            self.conn_lock = __import__("threading").Lock()
+            self._init_db()
+            self.initialized = True
+
+    monkeypatch.setattr(StateManager, "__init__", mock_init)
+    StateManager._instance = None
+    manager = StateManager()
+
+    images = manager.get_staged_images()
+    assert len(images) == 1
+    assert images[0]["image_type"] == "survey"
+
+    ortho_id = manager.add_image(
+        filename="ortho.jpg",
+        staging_path="/tmp/ortho.jpg",
+        upload_key="survey-key-1",
+        image_type="orthomosaic",
+    )
+    assert ortho_id > 0
+
+    conn = sqlite3.connect(db_path)
+    ddl = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='images'"
+    ).fetchone()[0]
+    conn.close()
+    assert "CHECK(image_type IN" not in ddl
+
+    monkeypatch.setattr(StateManager, "__init__", original_init)
+    StateManager._instance = None
