@@ -5,7 +5,7 @@ This guide covers building platform-specific packages for the DFN Image Uploader
 ## Prerequisites
 
 ### All Platforms
-- Python 3.10 or higher
+- Python 3.10, 3.11, or 3.12 (3.13 is currently blocked by the PySide6 dependency)
 - Poetry for dependency management
 
 ### Platform-Specific
@@ -44,11 +44,22 @@ poetry add --group dev pyinstaller
 poetry run pyinstaller --name="DFN-Uploader" \
     --windowed \
     --onefile \
+    --collect-all PySide6 \
     --icon=icon.ico \
-    --add-data="icon.ico:." \
+    --add-data="icon.ico;." \
     src/main.py
 
 # Output will be in dist/DFN-Uploader.exe
+
+# Debug build — opens a console window on launch so runtime errors are visible
+poetry run pyinstaller --name="DFN-Uploader-debug" \
+    --onefile \
+    --collect-all PySide6 \
+    --icon=icon.ico \
+    --add-data="icon.ico;." \
+    src/main.py
+
+# Output will be in dist/DFN-Uploader-debug.exe
 ```
 
 ### macOS Application Bundle
@@ -120,7 +131,10 @@ appimagetool AppDir DFN-Uploader.AppImage
 ### Windows
 ```cmd
 dist\DFN-Uploader.exe
+dist\DFN-Uploader-debug.exe
 ```
+
+On Windows, file logs are written to `%APPDATA%\DFN\uploader.log` (not next to the executable).
 
 ### macOS
 ```bash

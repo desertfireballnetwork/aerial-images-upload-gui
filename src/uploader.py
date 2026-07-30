@@ -37,10 +37,11 @@ from PySide6.QtWidgets import (
     QSizePolicy,
 )
 from PySide6.QtCore import QTimer, QThread, Signal, Qt
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtGui import QFont, QColor, QIcon
 import psutil
 import logging
 
+from .app_paths import resolve_icon_path
 from .state_manager import StateManager
 from .sd_monitor import SDMonitor, eject_device
 from .staging import StagingCopier, FolderScanner
@@ -581,6 +582,10 @@ class UploaderWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("DFN Image Uploader")
         self.setMinimumSize(860, 620)
+
+        icon_path = resolve_icon_path()
+        if icon_path is not None:
+            self.setWindowIcon(QIcon(str(icon_path)))
 
         # Initialize components
         self.state_manager = StateManager()
