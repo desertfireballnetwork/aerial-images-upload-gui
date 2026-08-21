@@ -1,6 +1,6 @@
-# Deployment Guide for DFN Image Uploader
+# Deployment Guide for Drone -> Cloud
 
-This guide covers building platform-specific packages for the DFN Image Uploader.
+This guide covers building platform-specific packages for the Drone -> Cloud application.
 
 ## Prerequisites
 
@@ -41,7 +41,7 @@ poetry install
 poetry add --group dev pyinstaller
 
 # Build single-file executable
-poetry run pyinstaller --name="DFN-Uploader" \
+poetry run pyinstaller --name="DroneToCloud" \
     --windowed \
     --onefile \
     --collect-all PySide6 \
@@ -49,17 +49,17 @@ poetry run pyinstaller --name="DFN-Uploader" \
     --add-data="icon.ico;." \
     src/main.py
 
-# Output will be in dist/DFN-Uploader.exe
+# Output will be in dist/DroneToCloud.exe
 
 # Debug build — opens a console window on launch so runtime errors are visible
-poetry run pyinstaller --name="DFN-Uploader-debug" \
+poetry run pyinstaller --name="DroneToCloud-debug" \
     --onefile \
     --collect-all PySide6 \
     --icon=icon.ico \
     --add-data="icon.ico;." \
     src/main.py
 
-# Output will be in dist/DFN-Uploader-debug.exe
+# Output will be in dist/DroneToCloud-debug.exe
 ```
 
 ### macOS Application Bundle
@@ -69,25 +69,25 @@ poetry run pyinstaller --name="DFN-Uploader-debug" \
 poetry add --group dev pyinstaller
 
 # Build .app bundle
-poetry run pyinstaller --name="DFN Uploader" \
+poetry run pyinstaller --name="DroneToCloud" \
     --windowed \
     --onefile \
     --icon=icon.icns \
     --osx-bundle-identifier=au.csiro.dfn.uploader \
     src/main.py
 
-# Output will be in dist/DFN Uploader.app
+# Output will be in dist/DroneToCloud.app
 
 # Optional: Create DMG
 brew install create-dmg
 create-dmg \
-    --volname "DFN Uploader" \
+    --volname "DroneToCloud" \
     --window-pos 200 120 \
     --window-size 600 300 \
     --icon-size 100 \
     --app-drop-link 450 120 \
-    "DFN-Uploader.dmg" \
-    "dist/DFN Uploader.app"
+    "DroneToCloud.dmg" \
+    "dist/DroneToCloud.app"
 ```
 
 ### Linux AppImage
@@ -110,41 +110,41 @@ mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
 
 # 2. Copy application files
 cp -r src AppDir/usr/bin/
-cp icon.png AppDir/usr/share/icons/hicolor/256x256/apps/dfn-uploader.png
+cp icon.png AppDir/usr/share/icons/hicolor/256x256/apps/DroneToCloud.png
 
 # 3. Create desktop entry
-cat > AppDir/usr/share/applications/dfn-uploader.desktop << EOF
+cat > AppDir/usr/share/applications/DroneToCloud.desktop << EOF
 [Desktop Entry]
 Type=Application
-Name=DFN Uploader
+Name=Drone -> Cloud
 Exec=python -m src.main
-Icon=dfn-uploader
+Icon=DroneToCloud
 Categories=Utility;
 EOF
 
 # 4. Build AppImage
-appimagetool AppDir DFN-Uploader.AppImage
+appimagetool AppDir DroneToCloud.AppImage
 ```
 
 ## Testing Builds
 
 ### Windows
 ```cmd
-dist\DFN-Uploader.exe
-dist\DFN-Uploader-debug.exe
+dist\DroneToCloud.exe
+dist\DroneToCloud-debug.exe
 ```
 
 On Windows, file logs are written to `%APPDATA%\DFN\uploader.log` (not next to the executable).
 
 ### macOS
 ```bash
-open "dist/DFN Uploader.app"
+open "dist/DroneToCloud.app"
 ```
 
 ### Linux
 ```bash
-chmod +x DFN-Uploader.AppImage
-./DFN-Uploader.AppImage
+chmod +x DroneToCloud.AppImage
+./DroneToCloud.AppImage
 ```
 
 ## Continuous Integration
@@ -156,18 +156,18 @@ GitHub Actions workflow can automate builds for all platforms. See `.github/work
 ### Windows
 Use SignTool from Windows SDK:
 ```cmd
-signtool sign /f certificate.pfx /p password /t http://timestamp.digicert.com dist\DFN-Uploader.exe
+signtool sign /f certificate.pfx /p password /t http://timestamp.digicert.com dist\DroneToCloud.exe
 ```
 
 ### macOS
 ```bash
-codesign --deep --force --verify --verbose --sign "Developer ID Application: Your Name" "dist/DFN Uploader.app"
+codesign --deep --force --verify --verbose --sign "Developer ID Application: Your Name" "dist/DroneToCloud.app"
 
 # Notarize with Apple
-xcrun notarytool submit "DFN-Uploader.dmg" --keychain-profile "notarytool-profile" --wait
+xcrun notarytool submit "DroneToCloud.dmg" --keychain-profile "notarytool-profile" --wait
 
 # Staple notarization ticket
-xcrun stapler staple "DFN-Uploader.dmg"
+xcrun stapler staple "DroneToCloud.dmg"
 ```
 
 ## Distribution
@@ -177,9 +177,9 @@ xcrun stapler staple "DFN-Uploader.dmg"
 2. Push the tag: `git push origin v0.1.0`
 3. Create GitHub Release and upload platform-specific packages
 4. Assets should be named:
-   - `DFN-Uploader-v0.1.0-Windows.exe`
-   - `DFN-Uploader-v0.1.0-macOS.dmg`
-   - `DFN-Uploader-v0.1.0-Linux.AppImage`
+   - `DroneToCloud-v0.1.0-Windows.exe`
+   - `DroneToCloud-v0.1.0-macOS.dmg`
+   - `DroneToCloud-v0.1.0-Linux.AppImage`
 
 ## Troubleshooting
 

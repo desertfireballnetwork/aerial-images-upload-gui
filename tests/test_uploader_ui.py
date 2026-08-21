@@ -24,7 +24,6 @@ from src.state_manager import StateManager
 from src.stats_tracker import StatsTracker
 from src.uploader import UploaderWindow, _BANNER_TEXT, apply_stylesheet
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -36,7 +35,7 @@ def _make_patched_init(config_path: Path, staging_dir: Path):
 
     def patched_init(self):
         QMainWindow.__init__(self)
-        self.setWindowTitle("DFN Image Uploader")
+        self.setWindowTitle("Drone -> Cloud")
         self.setMinimumSize(1000, 820)
 
         self.state_manager = StateManager()

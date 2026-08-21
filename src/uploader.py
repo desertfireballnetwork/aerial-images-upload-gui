@@ -1,5 +1,5 @@
 """
-Main GUI application for DFN image uploader.
+Main GUI application for Drone -> Cloud.
 
 Field-optimised UX: high-contrast dark/light themes, large touch targets,
 numbered wizard-step layout, plain-English instructions.
@@ -238,6 +238,15 @@ def _build_stylesheet(p: dict, check_svg: str = "") -> str:
         padding: 8px;
         border-radius: 6px;
         color: #FFFFFF;
+    }}
+    QLabel[objectName="app_title"] {{
+        font-size: 18pt;
+        font-weight: bold;
+        color: {p['text']};
+    }}
+    QLabel[objectName="app_subtitle"] {{
+        font-size: 10pt;
+        color: {p['text_muted']};
     }}
     QLabel[objectName="stat_header"] {{
         font-size: 9pt;
@@ -580,7 +589,7 @@ class UploaderWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("DFN Image Uploader")
+        self.setWindowTitle("Drone -> Cloud")
         self.setMinimumSize(860, 620)
 
         icon_path = resolve_icon_path()
@@ -636,6 +645,19 @@ class UploaderWindow(QMainWindow):
         main_layout = QVBoxLayout(central_widget)
         main_layout.setSpacing(6)
         main_layout.setContentsMargins(12, 6, 12, 6)
+
+        # -- Header: app title + subtitle --
+        header_layout = QVBoxLayout()
+        header_layout.setSpacing(0)
+        self.app_title_label = QLabel("Drone -> Cloud")
+        self.app_title_label.setObjectName("app_title")
+        self.app_title_label.setAlignment(Qt.AlignCenter)
+        header_layout.addWidget(self.app_title_label)
+        self.app_subtitle_label = QLabel("Batch upload drone images to find.gfo.rocks")
+        self.app_subtitle_label.setObjectName("app_subtitle")
+        self.app_subtitle_label.setAlignment(Qt.AlignCenter)
+        header_layout.addWidget(self.app_subtitle_label)
+        main_layout.addLayout(header_layout)
 
         # -- Top bar: banner + theme toggle --
         top_bar = QHBoxLayout()
