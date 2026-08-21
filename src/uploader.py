@@ -7,6 +7,7 @@ numbered wizard-step layout, plain-English instructions.
 
 import sys
 import json
+import asyncio
 from pathlib import Path
 from PySide6.QtWidgets import (
     QApplication,
@@ -46,6 +47,7 @@ from .state_manager import StateManager
 from .sd_monitor import SDMonitor, eject_device
 from .staging import StagingCopier, FolderScanner
 from .upload_manager import UploadManager
+from .api_client import APIClient, SurveyLookupError
 from .stats_tracker import StatsTracker
 
 logger = logging.getLogger(__name__)
@@ -178,6 +180,50 @@ class _UnstagedCounter(QThread):
             text = f"Error scanning: {e}"
 
         self.result_ready.emit(text)
+
+
+class _StagingPreflightWorker(QThread):
+    """Count unstaged images and resolve the survey without blocking the UI."""
+
+    result_ready = Signal(int, str, str)
+    error = Signal(str)
+
+    def __init__(self, staging_dir_text: str, upload_key: str, state_manager, parent=None):
+        super().__init__(parent)
+        self._staging_dir_text = staging_dir_text
+        self._upload_key = upload_key
+        self._state_manager = state_manager
+
+    def _count_unstaged_images(self) -> int:
+        from .staging import IMAGE_EXTENSIONS
+
+        staging_dir = Path(self._staging_dir_text)
+        image_paths = []
+        for ext in {e.lower() for e in IMAGE_EXTENSIONS}:
+            if self.isInterruptionRequested():
+                return 0
+            pattern = f"*{''.join(f'[{c.lower()}{c.upper()}]' if c.isalpha() else c for c in ext)}"
+            image_paths.extend(staging_dir.rglob(pattern))
+
+        all_images = [p for p in dict.fromkeys(image_paths) if p.is_file()]
+        known_paths = self._state_manager.get_all_staging_paths()
+        return sum(1 for p in all_images if str(p) not in known_paths)
+
+    async def _resolve_survey_name(self) -> str:
+        async with APIClient() as client:
+            return await client.resolve_survey_name(self._upload_key)
+
+    def run(self):
+        try:
+            unstaged_count = self._count_unstaged_images()
+            if self.isInterruptionRequested():
+                return
+            survey_name = asyncio.run(self._resolve_survey_name())
+            self.result_ready.emit(unstaged_count, survey_name, self._upload_key)
+        except SurveyLookupError as e:
+            self.error.emit(str(e))
+        except Exception as e:
+            self.error.emit(f"Could not confirm this Upload Key: {e}")
 
 
 def _build_stylesheet(p: dict, check_svg: str = "") -> str:
@@ -602,6 +648,7 @@ class UploaderWindow(QMainWindow):
         self.stats_tracker = StatsTracker()
         self.staging_thread = None
         self.scan_thread = None
+        self.preflight_thread = None
         self.upload_thread = None
 
         # Theme state (default dark)
@@ -1200,10 +1247,12 @@ class UploaderWindow(QMainWindow):
         self.image_type_desc.setText(descs.get(text, ""))
 
     def _sync_stage_button_enabled(self):
-        """Enable Stage only when a real type is selected and no folder scan is running."""
+        """Enable Stage only when a real type is selected and no staging work is running."""
         has_type = self.image_type_combo.currentData() is not None
         scanning = self.scan_thread is not None and self.scan_thread.isRunning()
-        self.stage_btn.setEnabled(has_type and not scanning)
+        preflight_thread = getattr(self, "preflight_thread", None)
+        preflighting = preflight_thread is not None and preflight_thread.isRunning()
+        self.stage_btn.setEnabled(has_type and not scanning and not preflighting)
 
     def _on_image_type_index_changed(self, _index: int):
         """Re-evaluate Stage enablement when the image type combo changes."""
@@ -1464,7 +1513,7 @@ class UploaderWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def start_folder_scan(self):
-        """Start scanning the staging folder and registering images."""
+        """Start the preflight confirmation before registering images."""
         staging_dir = Path(self.staging_dir_edit.text())
         if not staging_dir.exists():
             QMessageBox.warning(
@@ -1493,6 +1542,72 @@ class UploaderWindow(QMainWindow):
             )
             return
 
+        self.preflight_thread = _StagingPreflightWorker(
+            str(staging_dir), upload_key, self.state_manager
+        )
+        self.preflight_thread.result_ready.connect(
+            lambda count, survey_name, resolved_key: self.on_staging_preflight_ready(
+                staging_dir, image_type, resolved_key, count, survey_name
+            )
+        )
+        self.preflight_thread.error.connect(self.on_staging_preflight_error)
+
+        self.stage_btn.setEnabled(False)
+        self.refresh_unstaged_btn.setEnabled(False)
+        self.scan_progress.setValue(0)
+        self.scan_status_label.setText("Confirming Upload Key...")
+        self.preflight_thread.start()
+        self.log(f"Confirming Upload Key before staging {image_type} images...")
+
+    def on_staging_preflight_ready(
+        self,
+        staging_dir: Path,
+        image_type: str,
+        upload_key: str,
+        image_count: int,
+        survey_name: str,
+    ):
+        """Ask the user to confirm the resolved survey before staging."""
+        self.preflight_thread = None
+        self.scan_status_label.setText("Upload Key confirmed")
+        self.refresh_unstaged_btn.setEnabled(True)
+
+        msg = (
+            f"You are about to stage {image_count} images of type {image_type} "
+            f"for upload to survey {survey_name}.\n\n"
+            "Proceed?"
+        )
+        reply = QMessageBox.question(
+            self,
+            "Confirm Staging",
+            msg,
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            self.scan_status_label.setText("Staging cancelled")
+            self._sync_stage_button_enabled()
+            self.log("Staging cancelled before registration.")
+            return
+
+        self._start_folder_scan_after_confirmation(staging_dir, image_type, upload_key)
+
+    def on_staging_preflight_error(self, message: str):
+        """Block staging when the Upload Key cannot be resolved."""
+        self.preflight_thread = None
+        self.refresh_unstaged_btn.setEnabled(True)
+        self.scan_status_label.setText("Upload Key could not be confirmed")
+        self._sync_stage_button_enabled()
+        QMessageBox.warning(
+            self,
+            "Upload Key Not Confirmed",
+            f"{message}\n\nStaging has not started. Please check the Upload Key and try again.",
+        )
+        self.log(f"Staging blocked: {message}")
+
+    def _start_folder_scan_after_confirmation(
+        self, staging_dir: Path, image_type: str, upload_key: str
+    ):
+        """Start the existing FolderScanner registration path after confirmation."""
         self.scan_thread = FolderScanner(staging_dir, image_type, upload_key, self.state_manager)
         self.scan_thread.progress.connect(self.on_scan_progress)
         self.scan_thread.finished.connect(self.on_scan_finished)
@@ -1503,7 +1618,7 @@ class UploaderWindow(QMainWindow):
         self.scan_status_label.setText("")
         self.scan_thread.start()
         self.set_banner_state("STAGING")
-        self.log(f"Scanning staging folder for {image_type} images…")
+        self.log(f"Scanning staging folder for {image_type} images...")
 
     def on_scan_progress(self, current, total, filename):
         """Handle folder scan progress update."""
@@ -1793,8 +1908,14 @@ class UploaderWindow(QMainWindow):
             self.staging_thread.wait()
 
         if self.scan_thread and self.scan_thread.isRunning():
-            self.scan_thread.stop()
+            if hasattr(self.scan_thread, "stop"):
+                self.scan_thread.stop()
             self.scan_thread.wait()
+
+        preflight_thread = getattr(self, "preflight_thread", None)
+        if preflight_thread and preflight_thread.isRunning():
+            preflight_thread.requestInterruption()
+            preflight_thread.wait()
 
         if self.upload_thread and self.upload_thread.isRunning():
             self.upload_thread.stop()

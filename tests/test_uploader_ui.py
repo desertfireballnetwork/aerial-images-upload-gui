@@ -45,6 +45,7 @@ def _make_patched_init(config_path: Path, staging_dir: Path):
         self.stats_tracker = StatsTracker()
         self.staging_thread = None
         self.scan_thread = None
+        self.preflight_thread = None
         self.upload_thread = None
         self._dark_mode = True
 
@@ -125,6 +126,42 @@ def _build_ui_window(qtbot, tmp_path, monkeypatch, platform=None):
     qtbot.addWidget(window)
     window.show()
     return window
+
+
+class _Signal:
+    """Tiny signal helper for synchronous worker test doubles."""
+
+    def __init__(self):
+        self._callbacks = []
+
+    def connect(self, callback):
+        self._callbacks.append(callback)
+
+    def emit(self, *args):
+        for callback in list(self._callbacks):
+            callback(*args)
+
+
+class ImmediatePreflightWorker:
+    """Synchronous successful preflight replacement for UI tests."""
+
+    def __init__(self, staging_dir_text, upload_key, state_manager, parent=None):
+        self.result_ready = _Signal()
+        self.error = _Signal()
+        self.upload_key = upload_key
+
+    def isRunning(self):
+        return False
+
+    def start(self):
+        self.result_ready.emit(2, "Resolved Survey", self.upload_key)
+
+
+class FailingPreflightWorker(ImmediatePreflightWorker):
+    """Synchronous failing preflight replacement for UI tests."""
+
+    def start(self):
+        self.error.emit("Upload Key was not recognised by the webapp.")
 
 
 @pytest.fixture(autouse=True)
@@ -595,3 +632,106 @@ class TestOrthomosaicImageType:
         ui_window.image_type_combo.setCurrentText("orthomosaic")
         assert ui_window.image_type_combo.currentData() == "orthomosaic"
         assert ui_window.image_type_desc.text() == "Low-res images for orthomosaic processing"
+
+
+class TestStagingConfirmation:
+    """Stage confirmation resolves the survey before FolderScanner registration."""
+
+    def test_stage_confirmation_cancel_prevents_scanner(self, ui_window, tmp_path, monkeypatch):
+        staging_dir = tmp_path / "staging"
+        staging_dir.mkdir(exist_ok=True)
+        (staging_dir / "image1.jpg").write_bytes(b"jpg")
+        ui_window.staging_dir_edit.setText(str(staging_dir))
+        ui_window.upload_key_edit.setText("survey-key")
+        ui_window.image_type_combo.setCurrentText("survey")
+
+        scanner_created = []
+        monkeypatch.setattr("src.uploader._StagingPreflightWorker", ImmediatePreflightWorker)
+        monkeypatch.setattr(
+            "src.uploader.QMessageBox.question",
+            lambda *a, **kw: QMessageBox.StandardButton.No,
+        )
+        monkeypatch.setattr(
+            "src.uploader.FolderScanner",
+            lambda *a, **kw: scanner_created.append(a),
+        )
+
+        ui_window.start_folder_scan()
+
+        assert scanner_created == []
+        assert ui_window.stage_btn.isEnabled() is True
+
+    def test_stage_confirmation_proceed_starts_scanner(self, ui_window, tmp_path, monkeypatch):
+        staging_dir = tmp_path / "staging"
+        staging_dir.mkdir(exist_ok=True)
+        (staging_dir / "image1.jpg").write_bytes(b"jpg")
+        ui_window.staging_dir_edit.setText(str(staging_dir))
+        ui_window.upload_key_edit.setText("survey-key")
+        ui_window.image_type_combo.setCurrentText("survey")
+
+        class Scanner:
+            def __init__(self, *args):
+                self.args = args
+                self.progress = _Signal()
+                self.finished = _Signal()
+                self.started = False
+
+            def isRunning(self):
+                return self.started
+
+            def start(self):
+                self.started = True
+
+            def stop(self):
+                self.started = False
+
+            def wait(self, *_args):
+                return True
+
+        scanner_holder = {}
+
+        def make_scanner(*args):
+            scanner = Scanner(*args)
+            scanner_holder["scanner"] = scanner
+            return scanner
+
+        monkeypatch.setattr("src.uploader._StagingPreflightWorker", ImmediatePreflightWorker)
+        monkeypatch.setattr(
+            "src.uploader.QMessageBox.question",
+            lambda *a, **kw: QMessageBox.StandardButton.Yes,
+        )
+        monkeypatch.setattr("src.uploader.FolderScanner", make_scanner)
+
+        ui_window.start_folder_scan()
+
+        scanner = scanner_holder["scanner"]
+        assert scanner.args[0] == staging_dir
+        assert scanner.args[1] == "survey"
+        assert scanner.args[2] == "survey-key"
+        assert scanner.started is True
+
+    def test_stage_lookup_failure_blocks_scanner(self, ui_window, tmp_path, monkeypatch):
+        staging_dir = tmp_path / "staging"
+        staging_dir.mkdir(exist_ok=True)
+        ui_window.staging_dir_edit.setText(str(staging_dir))
+        ui_window.upload_key_edit.setText("bad-key")
+        ui_window.image_type_combo.setCurrentText("survey")
+
+        scanner_created = []
+        warning_calls = []
+        monkeypatch.setattr("src.uploader._StagingPreflightWorker", FailingPreflightWorker)
+        monkeypatch.setattr(
+            "src.uploader.FolderScanner",
+            lambda *a, **kw: scanner_created.append(a),
+        )
+        monkeypatch.setattr(
+            "src.uploader.QMessageBox.warning",
+            lambda *args, **kw: warning_calls.append(args) or QMessageBox.StandardButton.Ok,
+        )
+
+        ui_window.start_folder_scan()
+
+        assert scanner_created == []
+        assert warning_calls
+        assert "Staging has not started" in warning_calls[0][2]
+        assert ui_window.stage_btn.isEnabled() is True
