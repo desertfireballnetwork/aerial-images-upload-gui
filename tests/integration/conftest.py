@@ -30,6 +30,7 @@ from src.state_manager import StateManager
 from src.sd_monitor import SDCardInfo
 from src.stats_tracker import StatsTracker
 from src.upload_manager import UploadManager
+from src.api_client import APIClient
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -89,6 +90,35 @@ def process_events():
     app = QApplication.instance()
     if app:
         app.processEvents()
+
+
+class _Signal:
+    """Tiny signal helper for deterministic integration preflight tests."""
+
+    def __init__(self):
+        self._callbacks = []
+
+    def connect(self, callback):
+        self._callbacks.append(callback)
+
+    def emit(self, *args):
+        for callback in list(self._callbacks):
+            callback(*args)
+
+
+class _ImmediatePreflightWorker:
+    """Synchronous preflight replacement used by integration fixtures."""
+
+    def __init__(self, staging_dir_text, upload_key, state_manager, parent=None):
+        self.result_ready = _Signal()
+        self.error = _Signal()
+        self.upload_key = upload_key
+
+    def isRunning(self):
+        return False
+
+    def start(self):
+        self.result_ready.emit(0, f"Survey {self.upload_key}", self.upload_key)
 
 
 # ---------------------------------------------------------------------------
@@ -263,8 +293,15 @@ def app_window(
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **kw: QMessageBox.StandardButton.Ok)
     monkeypatch.setattr(QMessageBox, "critical", lambda *a, **kw: QMessageBox.StandardButton.Ok)
 
+    async def _fake_resolve_survey_name(self, upload_key):
+        return f"Survey {upload_key}"
+
+    monkeypatch.setattr(APIClient, "resolve_survey_name", _fake_resolve_survey_name)
+
+    from src import uploader as uploader_mod
     from src.uploader import UploaderWindow
 
+    monkeypatch.setattr(uploader_mod, "_StagingPreflightWorker", _ImmediatePreflightWorker)
     monkeypatch.setattr(UploaderWindow, "__init__", _make_patched_init(config_path, staging_dir))
 
     window = UploaderWindow()
@@ -308,6 +345,7 @@ def _make_patched_init(config_path: Path, staging_dir: Path):
         self.stats_tracker = StatsTracker()
         self.staging_thread = None
         self.scan_thread = None
+        self.preflight_thread = None
         self.upload_thread = None
         self._dark_mode = True
 

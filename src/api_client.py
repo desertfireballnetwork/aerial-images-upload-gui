@@ -12,6 +12,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+class SurveyLookupError(Exception):
+    """Raised when the webapp cannot resolve an upload key to a survey name."""
+
+
 class APIClient:
     """Client for DFN webapp upload API."""
 
@@ -58,6 +62,59 @@ class APIClient:
                     return False
         except aiohttp.ClientError as e:
             logger.error(f"Error checking if image uploaded: {e}")
+            raise
+
+    async def resolve_survey_name(self, upload_key: str) -> str:
+        """
+        Resolve an upload key to a displayable survey name.
+
+        Args:
+            upload_key: Survey upload key.
+
+        Returns:
+            Non-empty survey display name.
+
+        Raises:
+            RuntimeError: If the client is not open.
+            SurveyLookupError: If the key cannot be resolved or the response is invalid.
+            aiohttp.ClientError: For network failures.
+        """
+        if not self.session:
+            raise RuntimeError("APIClient must be used as context manager")
+
+        url = f"{self.base_url}/survey/upload/resolve/"
+        data = {"key": upload_key}
+
+        try:
+            async with self.session.post(url, data=data) as response:
+                if response.status == 404:
+                    raise SurveyLookupError("Upload Key was not recognised by the webapp.")
+                if response.status >= 500:
+                    raise SurveyLookupError(
+                        "The webapp could not confirm this Upload Key right now "
+                        f"(HTTP {response.status})."
+                    )
+                if response.status != 200:
+                    raise SurveyLookupError(
+                        f"The webapp could not confirm this Upload Key (HTTP {response.status})."
+                    )
+
+                try:
+                    payload = await response.json()
+                except Exception as e:
+                    raise SurveyLookupError(
+                        "The webapp returned an invalid survey lookup response."
+                    ) from e
+
+                survey_name = str(payload.get("survey_name") or "").strip()
+                if not survey_name:
+                    raise SurveyLookupError(
+                        "The webapp did not return a survey name for this Upload Key."
+                    )
+
+                return survey_name
+        except aiohttp.ClientError:
+            logger.error("Network error resolving survey name", exc_info=True)
             raise
 
     async def upload_image(

@@ -5,11 +5,11 @@ import aiohttp
 from aioresponses import aioresponses
 from pathlib import Path
 from unittest.mock import patch
-from src.api_client import APIClient
-
+from src.api_client import APIClient, SurveyLookupError
 
 CHECK_URL = "https://find.gfo.rocks/survey/upload/check/"
 UPLOAD_URL = "https://find.gfo.rocks/survey/upload/"
+RESOLVE_URL = "https://find.gfo.rocks/survey/upload/resolve/"
 
 
 @pytest.mark.asyncio
@@ -215,3 +215,81 @@ async def test_upload_image_unknown_extension_uses_octet_stream(tmp_path):
                 assert success is True
 
     assert captured_content_type == "application/octet-stream"
+
+
+@pytest.mark.asyncio
+async def test_resolve_survey_name_success():
+    """Resolve returns the survey display name for a valid upload key."""
+    with aioresponses() as m:
+        m.post(RESOLVE_URL, status=200, payload={"survey_name": "DFN Survey 001"})
+        async with APIClient() as client:
+            assert await client.resolve_survey_name("survey-key") == "DFN Survey 001"
+
+
+@pytest.mark.asyncio
+async def test_resolve_survey_name_invalid_key():
+    """404 resolver response blocks staging as an invalid upload key."""
+    with aioresponses() as m:
+        m.post(RESOLVE_URL, status=404, payload={"error": "invalid_upload_key"})
+        async with APIClient() as client:
+            with pytest.raises(SurveyLookupError, match="not recognised"):
+                await client.resolve_survey_name("bad-key")
+
+
+@pytest.mark.asyncio
+async def test_resolve_survey_name_server_error():
+    """5xx resolver responses are retryable blocking lookup failures."""
+    with aioresponses() as m:
+        m.post(RESOLVE_URL, status=500, body="server error")
+        async with APIClient() as client:
+            with pytest.raises(SurveyLookupError, match="HTTP 500"):
+                await client.resolve_survey_name("survey-key")
+
+
+@pytest.mark.asyncio
+async def test_resolve_survey_name_malformed_json():
+    """Malformed JSON from the resolver blocks staging."""
+    with aioresponses() as m:
+        m.post(RESOLVE_URL, status=200, body="not json")
+        async with APIClient() as client:
+            with pytest.raises(SurveyLookupError, match="invalid survey lookup response"):
+                await client.resolve_survey_name("survey-key")
+
+
+@pytest.mark.asyncio
+async def test_resolve_survey_name_missing_or_blank_name():
+    """Missing or blank survey_name blocks staging."""
+    for payload in ({}, {"survey_name": "   "}):
+        with aioresponses() as m:
+            m.post(RESOLVE_URL, status=200, payload=payload)
+            async with APIClient() as client:
+                with pytest.raises(SurveyLookupError, match="did not return a survey name"):
+                    await client.resolve_survey_name("survey-key")
+
+
+@pytest.mark.asyncio
+async def test_resolve_survey_name_custom_base_url():
+    """Survey resolver respects custom API base URLs."""
+    url = "https://custom.example.com/survey/upload/resolve/"
+    with aioresponses() as m:
+        m.post(url, status=200, payload={"survey_name": "Custom Survey"})
+        async with APIClient("https://custom.example.com") as client:
+            assert await client.resolve_survey_name("survey-key") == "Custom Survey"
+
+
+@pytest.mark.asyncio
+async def test_resolve_survey_name_network_error():
+    """Network resolver failures propagate as ClientError."""
+    with aioresponses() as m:
+        m.post(RESOLVE_URL, exception=aiohttp.ClientError("network down"))
+        async with APIClient() as client:
+            with pytest.raises(aiohttp.ClientError):
+                await client.resolve_survey_name("survey-key")
+
+
+@pytest.mark.asyncio
+async def test_resolve_survey_name_outside_context_manager_raises():
+    """Calling resolver outside the context manager raises."""
+    client = APIClient()
+    with pytest.raises(RuntimeError, match="context manager"):
+        await client.resolve_survey_name("survey-key")
