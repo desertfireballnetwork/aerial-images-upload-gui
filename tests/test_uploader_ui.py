@@ -438,6 +438,68 @@ class TestWizardLayout:
 
 
 # ---------------------------------------------------------------------------
+# Upload completion progress tests
+# ---------------------------------------------------------------------------
+
+
+class TestUploadCompletionProgress:
+    """Final upload UI reconciliation."""
+
+    def test_upload_finished_reconciles_stale_progress_bar(self, ui_window, tmp_path):
+        """A stale partial progress bar is filled when final counts are complete."""
+        for index in range(3):
+            image_id = ui_window.state_manager.add_image(
+                filename=f"image-{index}.jpg",
+                staging_path=str(tmp_path / f"image-{index}.jpg"),
+                upload_key="test-key",
+                image_type="survey",
+            )
+            ui_window.state_manager.update_image_status(image_id, "uploaded")
+
+        ui_window.upload_progress.setMaximum(3)
+        ui_window.upload_progress.setValue(2)
+        ui_window.upload_start_btn.setEnabled(False)
+        ui_window.upload_pause_btn.setEnabled(True)
+        ui_window.upload_stop_btn.setEnabled(True)
+
+        ui_window.on_upload_finished()
+
+        assert ui_window.upload_progress.maximum() == 3
+        assert ui_window.upload_progress.value() == 3
+        assert "3" in ui_window.uploaded_label.text()
+        assert "0" in ui_window.pending_label.text()
+        assert ui_window.upload_start_btn.isEnabled()
+        assert not ui_window.upload_pause_btn.isEnabled()
+        assert not ui_window.upload_stop_btn.isEnabled()
+
+    def test_upload_finished_does_not_force_incomplete_queue_complete(self, ui_window, tmp_path):
+        """Pending work keeps the existing progress value instead of forcing 100%."""
+        uploaded_id = ui_window.state_manager.add_image(
+            filename="uploaded.jpg",
+            staging_path=str(tmp_path / "uploaded.jpg"),
+            upload_key="test-key",
+            image_type="survey",
+        )
+        ui_window.state_manager.update_image_status(uploaded_id, "uploaded")
+        ui_window.state_manager.add_image(
+            filename="pending.jpg",
+            staging_path=str(tmp_path / "pending.jpg"),
+            upload_key="test-key",
+            image_type="survey",
+        )
+
+        ui_window.upload_progress.setMaximum(2)
+        ui_window.upload_progress.setValue(1)
+
+        ui_window.on_upload_finished()
+
+        assert ui_window.upload_progress.maximum() == 2
+        assert ui_window.upload_progress.value() == 1
+        assert "1" in ui_window.uploaded_label.text()
+        assert "1" in ui_window.pending_label.text()
+
+
+# ---------------------------------------------------------------------------
 # Image type placeholder / Stage gate (Issue #4)
 # ---------------------------------------------------------------------------
 
