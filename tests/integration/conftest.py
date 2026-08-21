@@ -31,7 +31,6 @@ from src.sd_monitor import SDCardInfo
 from src.stats_tracker import StatsTracker
 from src.upload_manager import UploadManager
 
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -299,7 +298,7 @@ def _make_patched_init(config_path: Path, staging_dir: Path):
 
     def patched_init(self):
         QMainWindow.__init__(self)
-        self.setWindowTitle("DFN Image Uploader")
+        self.setWindowTitle("Drone -> Cloud")
         self.setMinimumSize(860, 620)
 
         self.state_manager = StateManager()

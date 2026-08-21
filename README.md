@@ -1,4 +1,6 @@
-# DFN Image Uploader
+# Drone -> Cloud
+
+Batch upload drone images to find.gfo.rocks
 
 Cross-platform GUI application for staging drone survey images from SD cards and uploading them to the DFN webapp with optimized parallel transfers.
 
@@ -27,15 +29,15 @@ Cross-platform GUI application for staging drone survey images from SD cards and
 
 ```bash
 poetry install
-poetry run dfn-uploader
+poetry run drone_to_cloud
 ```
 
 ### Production
 
 Download the appropriate package for your platform:
-- **Windows**: `dfn-uploader.exe`
-- **macOS**: `dfn-uploader.app` or `dfn-uploader.dmg`
-- **Linux**: `dfn-uploader.AppImage`
+- **Windows**: `DroneToCloud.exe`
+- **macOS**: `DroneToCloud.app` or `DroneToCloud.dmg`
+- **Linux**: `DroneToCloud.AppImage`
 
 ## Usage
 

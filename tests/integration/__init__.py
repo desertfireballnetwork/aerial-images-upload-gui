@@ -1,1 +1,1 @@
-"""Integration tests for the DFN image uploader GUI."""
+"""Integration tests for the Drone -> Cloud GUI."""

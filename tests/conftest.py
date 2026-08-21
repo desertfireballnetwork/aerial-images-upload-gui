@@ -1,5 +1,5 @@
 """
-Test fixtures and utilities for DFN uploader tests.
+Test fixtures and utilities for Drone -> Cloud tests.
 """
 
 import pytest

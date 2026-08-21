@@ -26,7 +26,7 @@ coverage = "^7.3.0"
 piexif = "^1.1.3"
 
 [tool.poetry.scripts]
-dfn-uploader = "src.main:main"
+drone_to_cloud = "src.main:main"
 
 [build-system]
 requires = ["poetry-core"]

@@ -1,5 +1,5 @@
 """
-Entry point for DFN image uploader application.
+Entry point for the Drone -> Cloud application.
 """
 
 import sys
@@ -45,7 +45,7 @@ def main():
 
     try:
         app = QApplication(sys.argv)
-        app.setApplicationName("DFN Image Uploader")
+        app.setApplicationName("Drone -> Cloud")
         app.setOrganizationName("DFN")
         app.setStyle("Fusion")  # Consistent cross-platform base
 
