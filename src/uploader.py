@@ -1658,7 +1658,14 @@ class UploaderWindow(QMainWindow):
         self.workers_label.setText("")
         self.set_banner_state("COMPLETE")
         self.log("Upload finished")
-        self.update_counts()
+        counts = self.update_counts()
+        uploaded = counts.get("uploaded", 0)
+        failed = counts.get("failed", 0)
+        active = counts.get("staged", 0) + counts.get("uploading", 0)
+        total = uploaded + failed + active
+        if active == 0 and total > 0:
+            self.upload_progress.setMaximum(total)
+            self.upload_progress.setValue(uploaded + failed)
 
     # ------------------------------------------------------------------
     # Image counts & statistics display
@@ -1670,6 +1677,7 @@ class UploaderWindow(QMainWindow):
         self.uploaded_label.setText(f"Uploaded: {counts.get('uploaded', 0)}")
         self.pending_label.setText(f"Pending: {counts.get('staged', 0)}")
         self.failed_label.setText(f"Failed: {counts.get('failed', 0)}")
+        return counts
 
     def update_display_stats(self):
         """Update statistics display."""
