@@ -20,7 +20,9 @@ This guide covers building platform-specific packages for the Drone -> Cloud app
 - create-dmg (optional, for DMG creation)
 
 #### Linux
-- python-appimage or AppImageKit
+- PyInstaller
+- binutils (required by PyInstaller to analyze shared libraries)
+- appimagetool (downloaded automatically by the build steps below)
 - FUSE (for testing AppImages)
 
 ## Building
@@ -28,13 +30,20 @@ This guide covers building platform-specific packages for the Drone -> Cloud app
 ### Install Dependencies
 
 ```bash
-### Install Dependencies
-
-```bash
+curl -sSL https://install.python-poetry.org | python3 -
+git clone https://github.com/desertfireballnetwork/aerial-images-upload-gui.git
+cd aerial-images-upload-gui
 poetry install
 ```
 
+On Linux, also install `binutils` (needed by PyInstaller — see Prerequisites above):
+```bash
+sudo apt install binutils
+```
+
 ### Windows Executable
+
+> PyInstaller does not cross-compile: this must be run on an actual Windows machine (or a Windows VM), not on Linux/macOS. Running it on Linux will produce a Linux ELF binary named `DroneToCloud`, not a `.exe`. Also note `--add-data` uses `;` as the separator on Windows but `:` on Linux/macOS.
 
 ```bash
 # Install PyInstaller
@@ -47,7 +56,7 @@ poetry run pyinstaller --name="DroneToCloud" \
     --collect-all PySide6 \
     --icon=icon.ico \
     --add-data="icon.ico;." \
-    src/main.py
+    entrypoint.py
 
 # Output will be in dist/DroneToCloud.exe
 
@@ -57,7 +66,7 @@ poetry run pyinstaller --name="DroneToCloud-debug" \
     --collect-all PySide6 \
     --icon=icon.ico \
     --add-data="icon.ico;." \
-    src/main.py
+    entrypoint.py
 
 # Output will be in dist/DroneToCloud-debug.exe
 ```
@@ -74,7 +83,7 @@ poetry run pyinstaller --name="DroneToCloud" \
     --onefile \
     --icon=icon.icns \
     --osx-bundle-identifier=au.csiro.dfn.uploader \
-    src/main.py
+    entrypoint.py
 
 # Output will be in dist/DroneToCloud.app
 
@@ -92,38 +101,46 @@ create-dmg \
 
 ### Linux AppImage
 
+The AppImage must be self-contained (no reliance on the target machine having Python/PySide6 installed), so it's built by wrapping a PyInstaller onefile binary with `appimagetool` rather than via `python-appimage`.
+
 ```bash
-# Install python-appimage
-pip install python-appimage
+# Install PyInstaller
+poetry add --group dev pyinstaller
 
-# Build AppImage
-python-appimage build app \
-    --python-version 3.10 \
-    --linux-tag manylinux2014_x86_64 \
-    src/main.py
+# 1. Build a self-contained onefile binary (icon is not applicable to
+#    PyInstaller on Linux — it's set via the .desktop entry instead)
+poetry run pyinstaller --name="DroneToCloud" \
+    --onefile \
+    --collect-all PySide6 \
+    entrypoint.py
 
-# Or using AppImageKit
-# 1. Create AppDir structure
+# 2. Assemble the AppDir
 mkdir -p AppDir/usr/bin
 mkdir -p AppDir/usr/share/applications
 mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
 
-# 2. Copy application files
-cp -r src AppDir/usr/bin/
+cp dist/DroneToCloud AppDir/usr/bin/
 cp icon.png AppDir/usr/share/icons/hicolor/256x256/apps/DroneToCloud.png
+cp icon.png AppDir/DroneToCloud.png
 
-# 3. Create desktop entry
 cat > AppDir/usr/share/applications/DroneToCloud.desktop << EOF
 [Desktop Entry]
 Type=Application
 Name=Drone -> Cloud
-Exec=python -m src.main
+Exec=DroneToCloud
 Icon=DroneToCloud
 Categories=Utility;
 EOF
+cp AppDir/usr/share/applications/DroneToCloud.desktop AppDir/
+ln -s usr/bin/DroneToCloud AppDir/AppRun
 
-# 4. Build AppImage
-appimagetool AppDir DroneToCloud.AppImage
+# 3. Download appimagetool (not preinstalled on most distros)
+curl -L -o appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+chmod +x appimagetool
+
+# 4. Build the AppImage
+# --appimage-extract-and-run avoids needing FUSE on the build machine
+./appimagetool --appimage-extract-and-run AppDir DroneToCloud.AppImage
 ```
 
 ## Testing Builds
@@ -149,7 +166,7 @@ chmod +x DroneToCloud.AppImage
 
 ## Continuous Integration
 
-GitHub Actions workflow can automate builds for all platforms. See `.github/workflows/build.yml`.
+`.github/workflows/build.yml` runs tests on every push/PR to `main`. Pushing a tag matching `v*.*.*` additionally triggers build jobs for Windows, macOS, and Linux (using GitHub-hosted runners — no cross-compilation needed, see above), then creates a GitHub Release with all three packages attached as assets.
 
 ## Code Signing
 

@@ -3,6 +3,7 @@ name: Build and Test
 on:
   push:
     branches: ["main"]
+    tags: ["v*.*.*"]
   pull_request:
     branches: ["main"]
 
@@ -10,10 +11,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
@@ -26,7 +27,7 @@ jobs:
 
       - name: Load cached venv
         id: cached-poetry-dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: .venv
           key: venv-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
@@ -51,3 +52,191 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: poetry run pytest --cov=src --cov-report=xml
+
+  build-windows:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 1.7.1
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Install PyInstaller
+        run: poetry add --group dev pyinstaller
+
+      - name: Build executable
+        run: |
+          poetry run pyinstaller --name="DroneToCloud" \
+            --windowed \
+            --onefile \
+            --collect-all PySide6 \
+            --icon=icon.ico \
+            --add-data="icon.ico;." \
+            entrypoint.py
+
+      - name: Rename artifact
+        run: mv dist/DroneToCloud.exe "dist/DroneToCloud-${{ github.ref_name }}-Windows.exe"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: dist/DroneToCloud-*-Windows.exe
+
+  build-macos:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 1.7.1
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Install PyInstaller
+        run: poetry add --group dev pyinstaller
+
+      - name: Build app bundle
+        run: |
+          poetry run pyinstaller --name="DroneToCloud" \
+            --windowed \
+            --onefile \
+            --icon=icon.icns \
+            --osx-bundle-identifier=au.csiro.dfn.uploader \
+            entrypoint.py
+
+      - name: Create DMG
+        run: |
+          brew install create-dmg
+          create-dmg \
+            --volname "DroneToCloud" \
+            --window-pos 200 120 \
+            --window-size 600 300 \
+            --icon-size 100 \
+            --app-drop-link 450 120 \
+            "DroneToCloud-${{ github.ref_name }}-macOS.dmg" \
+            "dist/DroneToCloud.app"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: DroneToCloud-*-macOS.dmg
+
+  build-linux:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 1.7.1
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install Qt system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 \
+            libgl1 \
+            libxkbcommon0 \
+            libdbus-1-3 \
+            libfontconfig1
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Install PyInstaller
+        run: poetry add --group dev pyinstaller
+
+      - name: Build executable
+        run: |
+          poetry run pyinstaller --name="DroneToCloud" \
+            --onefile \
+            --collect-all PySide6 \
+            entrypoint.py
+
+      - name: Assemble AppDir
+        run: |
+          mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
+          cp dist/DroneToCloud AppDir/usr/bin/
+          cp icon.png AppDir/usr/share/icons/hicolor/256x256/apps/DroneToCloud.png
+          cp icon.png AppDir/DroneToCloud.png
+          cat > AppDir/usr/share/applications/DroneToCloud.desktop << 'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=Drone -> Cloud
+          Exec=DroneToCloud
+          Icon=DroneToCloud
+          Categories=Utility;
+          EOF
+          cp AppDir/usr/share/applications/DroneToCloud.desktop AppDir/
+          ln -s usr/bin/DroneToCloud AppDir/AppRun
+
+      - name: Download appimagetool
+        run: |
+          curl -L -o appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+
+      - name: Build AppImage
+        run: ./appimagetool --appimage-extract-and-run AppDir "DroneToCloud-${{ github.ref_name }}-Linux.AppImage"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: DroneToCloud-*-Linux.AppImage
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/windows-build/*
+            artifacts/macos-build/*
+            artifacts/linux-build/*
