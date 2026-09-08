@@ -11,10 +11,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
@@ -27,7 +27,7 @@ jobs:
 
       - name: Load cached venv
         id: cached-poetry-dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: .venv
           key: venv-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
@@ -61,10 +61,10 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
@@ -89,7 +89,7 @@ jobs:
             --collect-all PySide6 \
             --icon=icon.ico \
             --add-data="icon.ico;." \
-            src/main.py
+            entrypoint.py
 
       - name: Rename artifact
         run: mv dist/DroneToCloud.exe "dist/DroneToCloud-${{ github.ref_name }}-Windows.exe"
@@ -104,10 +104,10 @@ jobs:
     needs: test
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
@@ -131,7 +131,7 @@ jobs:
             --onefile \
             --icon=icon.icns \
             --osx-bundle-identifier=au.csiro.dfn.uploader \
-            src/main.py
+            entrypoint.py
 
       - name: Create DMG
         run: |
@@ -155,10 +155,10 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
@@ -190,7 +190,7 @@ jobs:
           poetry run pyinstaller --name="DroneToCloud" \
             --onefile \
             --collect-all PySide6 \
-            src/main.py
+            entrypoint.py
 
       - name: Assemble AppDir
         run: |

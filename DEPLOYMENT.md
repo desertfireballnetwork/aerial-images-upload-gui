@@ -56,7 +56,7 @@ poetry run pyinstaller --name="DroneToCloud" \
     --collect-all PySide6 \
     --icon=icon.ico \
     --add-data="icon.ico;." \
-    src/main.py
+    entrypoint.py
 
 # Output will be in dist/DroneToCloud.exe
 
@@ -66,7 +66,7 @@ poetry run pyinstaller --name="DroneToCloud-debug" \
     --collect-all PySide6 \
     --icon=icon.ico \
     --add-data="icon.ico;." \
-    src/main.py
+    entrypoint.py
 
 # Output will be in dist/DroneToCloud-debug.exe
 ```
@@ -83,7 +83,7 @@ poetry run pyinstaller --name="DroneToCloud" \
     --onefile \
     --icon=icon.icns \
     --osx-bundle-identifier=au.csiro.dfn.uploader \
-    src/main.py
+    entrypoint.py
 
 # Output will be in dist/DroneToCloud.app
 
@@ -112,7 +112,7 @@ poetry add --group dev pyinstaller
 poetry run pyinstaller --name="DroneToCloud" \
     --onefile \
     --collect-all PySide6 \
-    src/main.py
+    entrypoint.py
 
 # 2. Assemble the AppDir
 mkdir -p AppDir/usr/bin
