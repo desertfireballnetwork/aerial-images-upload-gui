@@ -10,6 +10,7 @@ packages = [{include = "src"}]
 python = ">=3.10,<3.13"
 PySide6 = "^6.6.0"
 aiohttp = "^3.9.0"
+certifi = "^2024.2.2"
 Pillow = "^10.1.0"
 psutil = "^5.9.0"
 matplotlib = "^3.8.0"
