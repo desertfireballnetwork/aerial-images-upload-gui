@@ -3,13 +3,21 @@ API client for communicating with DFN webapp upload endpoints.
 """
 
 import mimetypes
+import ssl
 
 import aiohttp
+import certifi
 from pathlib import Path
 from typing import Optional, Tuple
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Build the TLS trust store from certifi's bundled CA bundle rather than relying on
+# the platform default. PyInstaller-frozen builds (notably on macOS) don't reliably
+# expose a usable system CA store to OpenSSL, which otherwise surfaces as
+# SSLCertVerificationError: unable to get local issuer certificate.
+_SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 
 
 class SurveyLookupError(Exception):
@@ -25,7 +33,10 @@ class APIClient:
 
     async def __aenter__(self):
         """Create session on context enter."""
-        self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=300, connect=30))
+        connector = aiohttp.TCPConnector(ssl=_SSL_CONTEXT)
+        self.session = aiohttp.ClientSession(
+            connector=connector, timeout=aiohttp.ClientTimeout(total=300, connect=30)
+        )
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
